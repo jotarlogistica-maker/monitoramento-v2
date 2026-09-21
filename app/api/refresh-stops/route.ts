@@ -1,0 +1,197 @@
+import { randomUUID } from "crypto";
+import { NextRequest, NextResponse } from "next/server";
+import { isAuthenticatedRequest } from "@/lib/auth";
+import { db } from "@/lib/firebaseAdmin";
+import { fetchRouteDetail } from "@/lib/mlApi";
+import { rebuildRadarFromFirestore } from "@/lib/radar";
+import { getMlCookie } from "@/lib/sessionStore";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+const BATCH_SIZE = 10;
+const CONCURRENCY = 3;
+const LEASE_MS = 90_000;
+
+async function fetchWithLimitedConcurrency<T>(items: any[], fn: (item: any) => Promise<T>): Promise<T[]> {
+  const results: T[] = [];
+  for (let index = 0; index < items.length; index += CONCURRENCY) {
+    results.push(...(await Promise.all(items.slice(index, index + CONCURRENCY).map(fn))));
+  }
+  return results;
+}
+
+function routeSignature(route: any): string {
+  return [
+    route.totalStops,
+    route.estimatedPackages,
+    route.collectedPackages,
+    route.preparedPackages,
+    route.status,
+    route.successfulStops,
+    route.failedStops,
+    route.withProblemStops,
+    route.pendingStops,
+  ].join("|");
+}
+
+async function acquireLease(): Promise<string | null> {
+  const token = randomUUID();
+  const ref = db().collection("config").doc("scan-lock");
+  const now = Date.now();
+
+  return db().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const expiresAt = Number(snapshot.data()?.expiresAt || 0);
+    if (expiresAt > now) return null;
+    transaction.set(ref, { token, acquiredAt: now, expiresAt: now + LEASE_MS });
+    return token;
+  });
+}
+
+async function releaseLease(token: string): Promise<void> {
+  const ref = db().collection("config").doc("scan-lock");
+  await db().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (snapshot.data()?.token === token) transaction.set(ref, { token: null, acquiredAt: 0, expiresAt: 0 });
+  });
+}
+
+function shouldScanRoute(route: any, routeIdsWithData: Set<number>, snapshots: Record<string, string>): boolean {
+  if (!routeIdsWithData.has(route.id)) return true;
+
+  // Uma rota que acabou de mudar para "close" ainda precisa de uma última
+  // leitura: é justamente nessa transição que a coleta final, cancelamentos ou
+  // ocorrências podem aparecer no detalhe. Depois que a assinatura final for
+  // salva, as próximas atualizações serão puladas normalmente.
+  return snapshots[String(route.id)] !== routeSignature(route);
+}
+
+async function persistStopsAndSnapshots(params: {
+  allRoutes: any[];
+  routesProcessed: any[];
+  newStops: any[];
+  snapshots: Record<string, string>;
+  rebuildRadar?: boolean;
+}) {
+  const { allRoutes, routesProcessed, newStops } = params;
+  const currentRouteIds = new Set(allRoutes.map((route) => route.id));
+  const processedRouteIds = new Set(routesProcessed.map((route) => route.id));
+  const stopsRef = db().collection("data").doc("stops");
+  const snapshotsRef = db().collection("data").doc("route-snapshots");
+
+  const [stopsSnapshot, currentSnapshotsSnapshot] = await Promise.all([stopsRef.get(), snapshotsRef.get()]);
+  const existingStops: any[] = stopsSnapshot.data()?.stops || [];
+
+  // Remove rotas que não existem mais na lista atual e substitui as que foram
+  // reescaneadas. Isso impede visitas antigas de parecerem uma cobertura válida.
+  const keptStops = existingStops.filter(
+    (stop) => currentRouteIds.has(stop.routeId) && !processedRouteIds.has(stop.routeId)
+  );
+  const updatedAt = new Date().toISOString();
+  await stopsRef.set({ stops: [...keptStops, ...newStops], updatedAt });
+
+  const currentSnapshots: Record<string, string> = currentSnapshotsSnapshot.data()?.snapshots || {};
+  const validSnapshots: Record<string, string> = {};
+  for (const route of allRoutes) {
+    const previous = currentSnapshots[String(route.id)] ?? params.snapshots[String(route.id)];
+    if (previous) validSnapshots[String(route.id)] = previous;
+  }
+  for (const route of routesProcessed) validSnapshots[String(route.id)] = routeSignature(route);
+  await snapshotsRef.set({ snapshots: validSnapshots, updatedAt });
+
+  if (params.rebuildRadar) await rebuildRadarFromFirestore();
+  return updatedAt;
+}
+
+export async function POST(req: NextRequest) {
+  if (!(await isAuthenticatedRequest(req))) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const cursor = Math.max(0, Number(body.cursor || 0));
+  const forceRouteIds = Array.isArray(body.forceRouteIds) ? body.forceRouteIds.map(Number) : [];
+
+  let initialData;
+  try {
+    initialData = await Promise.all([
+      getMlCookie(),
+      db().collection("data").doc("routes").get(),
+      db().collection("data").doc("stops").get(),
+      db().collection("data").doc("route-snapshots").get(),
+    ]);
+  } catch (error: any) {
+    return NextResponse.json({ error: error?.message || "Não foi possível carregar os dados da varredura." }, { status: 500 });
+  }
+  const [cookie, routesSnapshot, stopsSnapshot, snapshotsSnapshot] = initialData;
+
+  const allRoutes: any[] = routesSnapshot.data()?.routes || [];
+  const existingStops: any[] = stopsSnapshot.data()?.stops || [];
+  const snapshots: Record<string, string> = snapshotsSnapshot.data()?.snapshots || {};
+
+  if (!cookie) return NextResponse.json({ error: "Nenhuma sessão salva ainda." }, { status: 400 });
+  if (allRoutes.length === 0) {
+    return NextResponse.json({ error: "Nenhuma rota carregada ainda. Clica em 'Atualizar rotas' primeiro." }, { status: 400 });
+  }
+
+  const leaseToken = await acquireLease();
+  if (!leaseToken) {
+    return NextResponse.json(
+      { error: "Já existe uma varredura em andamento. A tentativa será liberada automaticamente se a outra execução parar." },
+      { status: 409 }
+    );
+  }
+
+  try {
+    if (forceRouteIds.length > 0) {
+      const wanted = new Set(forceRouteIds);
+      const routesToForce = allRoutes.filter((route) => wanted.has(route.id));
+      if (routesToForce.length === 0) {
+        return NextResponse.json({ error: "Nenhuma dessas rotas foi encontrada na lista atual." }, { status: 400 });
+      }
+      const results = await fetchWithLimitedConcurrency(routesToForce, (route) => fetchRouteDetail(route.id, cookie));
+      await persistStopsAndSnapshots({
+        allRoutes,
+        routesProcessed: routesToForce,
+        newStops: results.flatMap((result) => result.stops),
+        snapshots,
+        rebuildRadar: true,
+      });
+      return NextResponse.json({ ok: true, processed: routesToForce.length, total: routesToForce.length, done: true });
+    }
+
+    // O cursor percorre a lista estável de TODAS as rotas. A implementação
+    // anterior percorria uma lista que encolhia a cada lote e podia pular rotas.
+    const windowRoutes = allRoutes.slice(cursor, cursor + BATCH_SIZE);
+    const routeIdsWithData = new Set(existingStops.map((stop: any) => stop.routeId));
+    const routesToScan = windowRoutes.filter((route) => shouldScanRoute(route, routeIdsWithData, snapshots));
+    const results = await fetchWithLimitedConcurrency(routesToScan, (route) => fetchRouteDetail(route.id, cookie));
+    const nextCursor = cursor + BATCH_SIZE;
+    const done = nextCursor >= allRoutes.length;
+
+    await persistStopsAndSnapshots({
+      allRoutes,
+      routesProcessed: routesToScan,
+      newStops: results.flatMap((result) => result.stops),
+      snapshots,
+      // Só consolida o Radar quando a fotografia do ciclo está completa. Fazer
+      // isso em cada lote poderia classificar como "sem cobertura" um seller
+      // cuja segunda visita ainda estivesse em um lote posterior.
+      rebuildRadar: done,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      processed: Math.min(nextCursor, allRoutes.length),
+      scanned: routesToScan.length,
+      skipped: windowRoutes.length - routesToScan.length,
+      total: allRoutes.length,
+      nextCursor: done ? null : nextCursor,
+      done,
+    });
+  } catch (error: any) {
+    return NextResponse.json({ error: error?.message || "Erro ao buscar paradas." }, { status: 502 });
+  } finally {
+    await releaseLease(leaseToken).catch(() => undefined);
+  }
+}
