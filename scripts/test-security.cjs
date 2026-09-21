@@ -35,6 +35,18 @@ function assert(condition, message) {
   const encrypted = await session.encryptMlCookieValue(original);
   assert(encrypted.data !== original, "cookie não pode permanecer em texto puro");
   assert(await session.decryptMlCookieValue(encrypted) === original, "cookie criptografado deveria ser recuperado");
+  assert(
+    (await session.readMlCookieFromDocument({ cookieEncryptedV2: encrypted })) === original,
+    "formato definitivo V2 deveria ser lido"
+  );
+  assert(
+    (await session.readMlCookieFromDocument({ encryptedCookie: encrypted })) === original,
+    "formato criptografado dos primeiros deploys V2 deveria continuar legível"
+  );
+  assert(
+    (await session.readMlCookieFromDocument({ cookie: "  cookie-legado=ok  " })) === "cookie-legado=ok",
+    "cookie legado em texto puro deveria continuar legível"
+  );
 
   process.env.SESSION_ENCRYPTION_KEY = "outra-chave";
   let wrongKeyRejected = false;
@@ -44,8 +56,13 @@ function assert(condition, message) {
     wrongKeyRejected = true;
   }
   assert(wrongKeyRejected, "chave diferente deveria rejeitar a sessão criptografada");
+  assert(
+    (await session.readMlCookieFromDocument({ encryptedCookie: encrypted, cookie: "cookie-legado=atual" })) ===
+      "cookie-legado=atual",
+    "texto puro legado deveria servir de fallback se uma chave V2 antiga não puder ser aberta"
+  );
 
-  console.log("Segurança: sessão assinada e cookie criptografado aprovados.");
+  console.log("Segurança: sessão assinada, formatos legados e cookie V2 criptografado aprovados.");
 })().catch((error) => {
   console.error(error);
   process.exit(1);

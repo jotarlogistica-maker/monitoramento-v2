@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
     initialData = await Promise.all([
       getMlCookie(),
       db().collection("data").doc("radar-operacional").get(),
-      db().collection("config").doc("scan-lock").get(),
+      db().collection("config").doc("scan-lock-v2").get(),
     ]);
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || "Não foi possível carregar o Radar." }, { status: 500 });

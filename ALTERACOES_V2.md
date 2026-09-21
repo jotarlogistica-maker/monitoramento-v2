@@ -31,14 +31,16 @@
 
 - Corrigido o cursor da varredura, que podia pular rotas porque a lista filtrada diminuía entre lotes.
 - Remoção de paradas de rotas que não existem mais na lista atual.
-- Lease transacional no Firestore para impedir duas varreduras simultâneas.
+- Lease transacional em `config/scan-lock-v2` para impedir duas varreduras V2 simultâneas sem bloquear a V1.
 - Reescaneamento individual também reconstrói o Radar.
 - Reset diário limpa Radar e lease.
 - Funções pesadas configuradas para runtime Node e duração máxima de 60 segundos no Vercel.
 - Pipeline de CI incluído em `.github/workflows/ci.yml`.
 - Next.js atualizado da linha 14 antiga para `15.5.24`, com React `19.2.4`, mantendo o projeto em uma linha corrigida e suportada.
 - Autenticação migrada para token HMAC assinado; a senha não fica mais no cookie do navegador.
-- Cookie operacional do Mercado Livre criptografado no Firestore, com leitura compatível do formato legado.
+- Cookie operacional do Mercado Livre criptografado em `config/session-v2`, com leitura compatível do `config/session` legado sem sobrescrevê-lo.
+- **Salvar sessão** agora valida e grava somente a sessão; a atualização de rotas depende exclusivamente do clique em **Atualizar rotas**.
+- Estados visuais separados para salvar sessão, atualizar rotas e zerar o painel, eliminando o falso “Buscando rotas...” durante o salvamento.
 - Rotas que acabaram de mudar para `close` recebem uma última leitura antes de serem ignoradas.
 - Métricas ausentes permanecem `null` e entram como `Revisar`, em vez de serem convertidas silenciosamente em zero.
 - Sellers AM passa a usar `coletadoCard` separado da coleta confirmada pelas rotas ao corrigir atraso do card.

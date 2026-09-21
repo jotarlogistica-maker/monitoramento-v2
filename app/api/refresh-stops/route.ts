@@ -38,7 +38,7 @@ function routeSignature(route: any): string {
 
 async function acquireLease(): Promise<string | null> {
   const token = randomUUID();
-  const ref = db().collection("config").doc("scan-lock");
+  const ref = db().collection("config").doc("scan-lock-v2");
   const now = Date.now();
 
   return db().runTransaction(async (transaction) => {
@@ -51,7 +51,7 @@ async function acquireLease(): Promise<string | null> {
 }
 
 async function releaseLease(token: string): Promise<void> {
-  const ref = db().collection("config").doc("scan-lock");
+  const ref = db().collection("config").doc("scan-lock-v2");
   await db().runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
     if (snapshot.data()?.token === token) transaction.set(ref, { token: null, acquiredAt: 0, expiresAt: 0 });

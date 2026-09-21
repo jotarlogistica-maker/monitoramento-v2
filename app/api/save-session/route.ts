@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticatedRequest } from "@/lib/auth";
+import { fetchEstimatedDataSummary } from "@/lib/mlApi";
 import { saveMlCookie } from "@/lib/sessionStore";
 
 export const runtime = "nodejs";
@@ -14,6 +15,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Cookie inválido ou vazio." }, { status: 400 });
   }
 
-  await saveMlCookie(cookie.trim());
-  return NextResponse.json({ ok: true });
+  const normalizedCookie = cookie.trim();
+  try {
+    // Validação leve e sem efeitos colaterais: consulta somente o resumo da
+    // facility. Não atualiza routes, stops, Radar nem inicia uma varredura.
+    await fetchEstimatedDataSummary("BRRJ02", normalizedCookie);
+    await saveMlCookie(normalizedCookie);
+    return NextResponse.json({ ok: true, validated: true });
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error?.message || "Não foi possível validar a sessão do Mercado Livre." },
+      { status: 400 }
+    );
+  }
 }

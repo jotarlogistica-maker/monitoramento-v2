@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     db().collection("data").doc("stops").set({ stops: [], updatedAt: null }),
     db().collection("data").doc("route-snapshots").set({ snapshots: {} }),
     db().collection("data").doc("radar-operacional").set({ items: {}, updatedAt: null, sourceStopsUpdatedAt: null }),
-    db().collection("config").doc("scan-lock").set({ token: null, acquiredAt: 0, expiresAt: 0 }),
+    db().collection("config").doc("scan-lock-v2").set({ token: null, acquiredAt: 0, expiresAt: 0 }),
   ]);
 
   return NextResponse.json({ ok: true });

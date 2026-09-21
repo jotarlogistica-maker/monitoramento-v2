@@ -75,7 +75,8 @@ Nenhuma migração manual do Firestore é necessária. Os documentos novos são 
 
 ```text
 data/radar-operacional
-config/scan-lock
+config/scan-lock-v2
+config/session-v2
 ```
 
 Os documentos legados continuam compatíveis.
@@ -84,7 +85,11 @@ Os documentos legados continuam compatíveis.
 ### Segurança da sessão
 
 - O login grava um token assinado e com validade de 30 dias; a senha não fica mais armazenada no cookie do navegador.
-- O cookie do Mercado Livre é salvo criptografado no Firestore. Instalações existentes continuam lendo o documento legado e o convertem automaticamente no próximo salvamento.
+- O cookie do Mercado Livre da V2 é salvo criptografado em `config/session-v2`.
+- A V2 continua lendo `config/session.cookie` em texto puro e o antigo campo criptografado `config/session.encryptedCookie`.
+- O botão **Salvar sessão** valida o cookie com uma consulta leve antes de gravá-lo; ele não atualiza rotas, paradas ou Radar.
+- A V2 nunca grava em `config/session`, preservando o formato esperado pela V1.
+- O lease de varredura usa `config/scan-lock-v2`, sem disputar `config/scan-lock` com a V1.
 - Depois do primeiro deploy desta versão, faça login novamente porque o cookie de autenticação antigo não é reutilizado.
 - Mantenha `SESSION_ENCRYPTION_KEY` estável. Se ela mudar — ou se você usa `APP_PASSWORD` como chave e alterar a senha — salve novamente o cookie do Mercado Livre.
 

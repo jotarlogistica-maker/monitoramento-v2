@@ -76,7 +76,10 @@ export default function DashboardPage() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [cookie, setCookie] = useState("");
   const [msg, setMsg] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [savingSession, setSavingSession] = useState(false);
+  const [refreshingRoutes, setRefreshingRoutes] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const actionInProgress = savingSession || refreshingRoutes || resetting;
   const [filter, setFilter] = useState<"todas" | "sem_inicio" | "com_problema">("todas");
   const [clusterFilter, setClusterFilter] = useState<string>("todos");
   const [carrierFilter, setCarrierFilter] = useState<string>("todas");
@@ -1243,18 +1246,23 @@ export default function DashboardPage() {
   }
 
   async function saveSession() {
-    setLoading(true);
+    setSavingSession(true);
     setMsg("");
-    const cookieToSave = normalizeCookieInput(cookie);
-    const res = await fetch("/api/save-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cookie: cookieToSave }),
-    });
-    const data = await res.json();
-    setLoading(false);
-    setMsg(res.ok ? "Sessão salva! Agora clica em Atualizar." : `Erro: ${data.error}`);
-    if (res.ok) setCookie("");
+    try {
+      const cookieToSave = normalizeCookieInput(cookie);
+      const res = await fetch("/api/save-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookie: cookieToSave }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setMsg(res.ok ? "Sessão validada e salva. Clique em Atualizar rotas quando quiser iniciar a busca." : `Erro: ${data.error || "não foi possível salvar a sessão."}`);
+      if (res.ok) setCookie("");
+    } catch (error: any) {
+      setMsg(`Erro: ${error?.message || "não foi possível salvar a sessão."}`);
+    } finally {
+      setSavingSession(false);
+    }
   }
 
   const [puLive, setPuLive] = useState<{ estimatedPackages: number; collectedPackages: number } | null>(null);
@@ -1281,19 +1289,24 @@ export default function DashboardPage() {
   // processo. A atualização automática de 2 em 2 min foi removida por decisão
   // do usuário — só roda quando clicado manualmente.
   async function refresh() {
-    setLoading(true);
+    setRefreshingRoutes(true);
     setMsg("Buscando rotas no Mercado Livre...");
-    const res = await fetch("/api/refresh", { method: "POST" });
-    const data = await res.json();
-    setLoading(false);
-    if (!res.ok) {
-      setMsg(`Erro: ${data.error}`);
-      return;
+    try {
+      const res = await fetch("/api/refresh", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg(`Erro: ${data.error || "não foi possível atualizar as rotas."}`);
+        return;
+      }
+      setMsg(`Rotas atualizadas (${data.count})! Buscando as paradas de cada uma...`);
+      loadData();
+      loadPuLive(); // PU LIVE junto, sem esperar a varredura pesada terminar
+      await scanAllStops();
+    } catch (error: any) {
+      setMsg(`Erro: ${error?.message || "não foi possível atualizar as rotas."}`);
+    } finally {
+      setRefreshingRoutes(false);
     }
-    setMsg(`Rotas atualizadas (${data.count})! Buscando as paradas de cada uma...`);
-    loadData();
-    loadPuLive(); // PU LIVE junto, sem esperar a varredura pesada terminar
-    await scanAllStops();
   }
 
 
@@ -1303,29 +1316,32 @@ export default function DashboardPage() {
     );
     if (!confirmado) return;
 
-    setLoading(true);
+    setResetting(true);
     setMsg("Zerando o painel...");
-    const [res, sellersRes] = await Promise.all([
-      fetch("/api/reset-day", { method: "POST" }),
-      fetch("/api/sellers-am", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "reset" }),
-      }),
-    ]);
-    setLoading(false);
-    if (res.ok && sellersRes.ok) {
-      setMsg("Painel zerado! Clica em 'Atualizar rotas' pra puxar o dia novo.");
-      setRoutes([]);
-      setUpdatedAt(null);
-      setStops([]);
-      setStopsUpdatedAt(null);
-      setLastCursor(0);
-      setSellersAm({});
-      setSellersAmUpdatedAt(null);
-      setRadarSummary({ total: 0, active: 0, pending: 0 });
-    } else {
-      setMsg("Erro ao zerar o painel.");
+    try {
+      const [res, sellersRes] = await Promise.all([
+        fetch("/api/reset-day", { method: "POST" }),
+        fetch("/api/sellers-am", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "reset" }),
+        }),
+      ]);
+      if (res.ok && sellersRes.ok) {
+        setMsg("Painel zerado! Clica em 'Atualizar rotas' pra puxar o dia novo.");
+        setRoutes([]);
+        setUpdatedAt(null);
+        setStops([]);
+        setStopsUpdatedAt(null);
+        setLastCursor(0);
+        setSellersAm({});
+        setSellersAmUpdatedAt(null);
+        setRadarSummary({ total: 0, active: 0, pending: 0 });
+      } else {
+        setMsg("Erro ao zerar o painel.");
+      }
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -1555,12 +1571,12 @@ export default function DashboardPage() {
                 {typeof scanProgress.puladas === "number" && scanProgress.puladas > 0 ? ` · ${scanProgress.puladas} sem mudança` : ""}
               </span>
             )}
-            <button onClick={resetDay} disabled={loading || scanning} style={{ ...secondaryBtn, color: "var(--red)" }}>
-              Zerar painel (novo dia)
+            <button onClick={resetDay} disabled={actionInProgress || scanning} style={{ ...secondaryBtn, color: "var(--red)" }}>
+              {resetting ? "Zerando painel..." : "Zerar painel (novo dia)"}
             </button>
             <div style={{ position: "relative" }}>
-              <button onClick={refresh} disabled={loading || scanning} style={primaryBtn}>
-                {loading
+              <button onClick={refresh} disabled={actionInProgress || scanning} style={primaryBtn}>
+                {refreshingRoutes
                   ? "Buscando rotas..."
                   : scanning
                   ? "Varrendo paradas..."
@@ -1614,8 +1630,8 @@ export default function DashboardPage() {
                 rows={4}
                 style={{ padding: 8, borderRadius: 8, border: "1px solid var(--border)", fontFamily: "monospace", fontSize: 12, resize: "vertical" }}
               />
-              <button onClick={saveSession} disabled={loading || !cookie} style={{ ...secondaryBtn, alignSelf: "flex-start" }}>
-                Salvar sessão
+              <button onClick={saveSession} disabled={actionInProgress || scanning || !cookie} style={{ ...secondaryBtn, alignSelf: "flex-start" }}>
+                {savingSession ? "Validando e salvando..." : "Salvar sessão"}
               </button>
             </div>
           </details>
