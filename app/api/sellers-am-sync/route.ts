@@ -10,6 +10,7 @@ import {
   mergeSellerRouteHistory,
   SellerRouteHistory,
 } from "@/lib/sellerRouteHistory";
+import { readStopsDocument } from "@/lib/stopsStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -125,14 +126,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, results });
   }
 
-  const [sellersDoc, stopsDoc, routesDoc] = await Promise.all([
+  const [sellersDoc, stopsDocument, routesDoc] = await Promise.all([
     db().collection("data").doc("sellers-am").get(),
-    db().collection("data").doc("stops").get(),
+    readStopsDocument(db()),
     db().collection("data").doc("routes").get(),
   ]);
 
   const sellers: Record<string, any> = sellersDoc.data()?.sellers || {};
-  const stops: any[] = stopsDoc.data()?.stops || [];
+  const stops: any[] = stopsDocument.stops || [];
   const routeMetadataById = new Map(
     ((routesDoc.data()?.routes || []) as any[]).map((route) => [Number(route.id), route])
   );

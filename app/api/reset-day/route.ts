@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticatedRequest } from "@/lib/auth";
 import { db } from "@/lib/firebaseAdmin";
+import { clearStopsDocument } from "@/lib/stopsStore";
 
 export async function POST(req: NextRequest) {
   if (!(await isAuthenticatedRequest(req))) {
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
   // na sessão do ML (cookie continua valendo).
   await Promise.all([
     db().collection("data").doc("routes").set({ routes: [], updatedAt: null }),
-    db().collection("data").doc("stops").set({ stops: [], updatedAt: null }),
+    clearStopsDocument(db()),
     db().collection("data").doc("route-snapshots").set({ snapshots: {} }),
     db().collection("data").doc("radar-operacional").set({ items: {}, updatedAt: null, sourceStopsUpdatedAt: null }),
     db().collection("config").doc("scan-lock-v2").set({ token: null, acquiredAt: 0, expiresAt: 0 }),

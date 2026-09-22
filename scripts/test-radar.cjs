@@ -8,7 +8,11 @@ const metricsModule = { exports: {} };
 new Function('module', 'exports', 'require', metricsJs)(metricsModule, metricsModule.exports, require);
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 const moduleObj = { exports: {} };
-new Function('module', 'exports', 'require', js)(moduleObj, moduleObj.exports, (id) => id === '@/lib/pointMetrics' ? metricsModule.exports : require(id));
+new Function('module', 'exports', 'require', js)(moduleObj, moduleObj.exports, (id) => {
+  if (id === '@/lib/pointMetrics') return metricsModule.exports;
+  if (id === '@/lib/stopsStore') return { readStopsDocument: async () => ({ stops: [], updatedAt: null }) };
+  return require(id);
+});
 const { buildRadarDocument } = moduleObj.exports;
 function assert(condition, message) { if (!condition) throw new Error(message); }
 const routes = [

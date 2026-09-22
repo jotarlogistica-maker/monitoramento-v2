@@ -47,6 +47,7 @@
 - Sellers AM preserva o histórico da varredura quando a API deixa de devolver uma rota finalizada, mantendo cluster, última rota e coleta confirmada.
 - Diagnóstico explica coletas confirmadas em outra rota e a pendência real depois de remover sobreposições entre visitas.
 - Diagnóstico inclui cards de fechamento para cluster e transportadora com maior impacto, usando somente pendências reconciliadas.
+- Paradas da V2 passam a ser armazenadas em blocos para não ultrapassar o limite de 1 MiB por documento do Firestore, mantendo compatibilidade legada sempre que o documento compartilhado couber.
 
 ## Novos arquivos principais
 

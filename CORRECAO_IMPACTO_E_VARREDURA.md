@@ -35,6 +35,13 @@ Também foram adicionados:
 - texto **Varrendo paradas...** durante a etapa correta;
 - reconstrução separada do Radar após reescaneamento individual.
 
+## Limite de 1 MiB do Firestore
+
+- As paradas da V2 são persistidas em documentos de até 350 registros, com um manifesto em `data/stops-v2`.
+- A leitura migra automaticamente do documento legado `data/stops` para os blocos V2, sem exigir limpeza ou troca de Firebase.
+- Campos opcionais vazios são removidos para reduzir o tamanho.
+- `data/stops` continua sendo atualizado no formato legado enquanto couber com margem segura; se atingir o limite, a V2 continua pelos blocos sem interromper a varredura e o último documento válido da V1 é preservado.
+
 ## Testes
 
 - cenário real do C32;

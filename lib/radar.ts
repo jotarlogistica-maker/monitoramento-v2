@@ -1,6 +1,7 @@
 import { db } from "@/lib/firebaseAdmin";
 import type { Route, Stop } from "@/lib/mlApi";
 import { reconcileVisitPackages } from "@/lib/pointMetrics";
+import { readStopsDocument } from "@/lib/stopsStore";
 
 export type RadarStatus =
   | "Reatribuir"
@@ -425,18 +426,16 @@ export function buildRadarDocument(
 
 export async function rebuildRadarFromFirestore(): Promise<RadarDocument> {
   const routesRef = db().collection("data").doc("routes");
-  const stopsRef = db().collection("data").doc("stops");
   const radarRef = db().collection("data").doc("radar-operacional");
+  const stopsData = await readStopsDocument(db());
 
   return db().runTransaction(async (transaction) => {
-    const [routesSnapshot, stopsSnapshot, radarSnapshot] = await Promise.all([
+    const [routesSnapshot, radarSnapshot] = await Promise.all([
       transaction.get(routesRef),
-      transaction.get(stopsRef),
       transaction.get(radarRef),
     ]);
 
     const routes = (routesSnapshot.data()?.routes || []) as RouteLike[];
-    const stopsData = stopsSnapshot.data() || {};
     const stops = (stopsData.stops || []) as StopLike[];
     const existingItems = (radarSnapshot.data()?.items || {}) as Record<string, RadarItem>;
     const document = buildRadarDocument(routes, stops, existingItems, stopsData.updatedAt || null);

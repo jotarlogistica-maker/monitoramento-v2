@@ -4,6 +4,7 @@ import { isAuthenticatedRequest } from "@/lib/auth";
 import { db } from "@/lib/firebaseAdmin";
 import { fetchRouteDetail } from "@/lib/mlApi";
 import { getMlCookie } from "@/lib/sessionStore";
+import { readStopsDocument, writeStopsDocument } from "@/lib/stopsStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,11 +77,13 @@ async function persistStopsAndSnapshots(params: {
   const { allRoutes, routesProcessed, newStops } = params;
   const currentRouteIds = new Set(allRoutes.map((route) => route.id));
   const processedRouteIds = new Set(routesProcessed.map((route) => route.id));
-  const stopsRef = db().collection("data").doc("stops");
   const snapshotsRef = db().collection("data").doc("route-snapshots");
 
-  const [stopsSnapshot, currentSnapshotsSnapshot] = await Promise.all([stopsRef.get(), snapshotsRef.get()]);
-  const existingStops: any[] = stopsSnapshot.data()?.stops || [];
+  const [stopsDocument, currentSnapshotsSnapshot] = await Promise.all([
+    readStopsDocument(db()),
+    snapshotsRef.get(),
+  ]);
+  const existingStops: any[] = stopsDocument.stops;
 
   // Remove rotas que não existem mais na lista atual e substitui as que foram
   // reescaneadas. Isso impede visitas antigas de parecerem uma cobertura válida.
@@ -97,7 +100,7 @@ async function persistStopsAndSnapshots(params: {
     };
   });
   const updatedAt = new Date().toISOString();
-  await stopsRef.set({ stops: enrichedStops, updatedAt });
+  await writeStopsDocument(db(), enrichedStops, updatedAt);
 
   const currentSnapshots: Record<string, string> = currentSnapshotsSnapshot.data()?.snapshots || {};
   const validSnapshots: Record<string, string> = {};
@@ -123,16 +126,16 @@ export async function POST(req: NextRequest) {
     initialData = await Promise.all([
       getMlCookie(),
       db().collection("data").doc("routes").get(),
-      db().collection("data").doc("stops").get(),
+      readStopsDocument(db()),
       db().collection("data").doc("route-snapshots").get(),
     ]);
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || "Não foi possível carregar os dados da varredura." }, { status: 500 });
   }
-  const [cookie, routesSnapshot, stopsSnapshot, snapshotsSnapshot] = initialData;
+  const [cookie, routesSnapshot, stopsDocument, snapshotsSnapshot] = initialData;
 
   const allRoutes: any[] = routesSnapshot.data()?.routes || [];
-  const existingStops: any[] = stopsSnapshot.data()?.stops || [];
+  const existingStops: any[] = stopsDocument.stops || [];
   const snapshots: Record<string, string> = snapshotsSnapshot.data()?.snapshots || {};
 
   if (!cookie) return NextResponse.json({ error: "Nenhuma sessão salva ainda." }, { status: 400 });
