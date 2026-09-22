@@ -48,6 +48,7 @@
 - Diagnóstico explica coletas confirmadas em outra rota e a pendência real depois de remover sobreposições entre visitas.
 - Diagnóstico inclui cards de fechamento para cluster e transportadora com maior impacto, usando somente pendências reconciliadas.
 - Paradas da V2 passam a ser armazenadas em blocos para não ultrapassar o limite de 1 MiB por documento do Firestore, mantendo compatibilidade legada sempre que o documento compartilhado couber.
+- Radar operacional também passa a usar armazenamento fragmentado e respostas pequenas no recálculo, eliminando falhas por documento ou resposta excessiva.
 
 ## Novos arquivos principais
 

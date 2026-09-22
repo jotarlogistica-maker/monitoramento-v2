@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticatedRequest } from "@/lib/auth";
 import { db } from "@/lib/firebaseAdmin";
 import { RadarItem, RadarStatus, rebuildRadarFromFirestore } from "@/lib/radar";
+import { readRadarDocument, writeRadarDocument } from "@/lib/radarStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,8 +38,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
   }
 
-  const snapshot = await db().collection("data").doc("radar-operacional").get();
-  const data = snapshot.data() || { items: {}, updatedAt: null, sourceStopsUpdatedAt: null };
+  const data = await readRadarDocument(db());
   return NextResponse.json(data);
 }
 
@@ -51,8 +51,12 @@ export async function POST(req: NextRequest) {
   const action = body.action || "rebuild";
 
   if (action === "rebuild") {
-    const document = await rebuildRadarFromFirestore();
-    return NextResponse.json({ ok: true, ...document });
+    try {
+      const document = await rebuildRadarFromFirestore();
+      return NextResponse.json({ ok: true, updatedAt: document.updatedAt, total: Object.keys(document.items).length });
+    } catch (error: any) {
+      return NextResponse.json({ error: error?.message || "Falha ao consolidar o Radar." }, { status: 500 });
+    }
   }
 
   if (!["bulk_override", "set_override", "clear_sync_error"].includes(action)) {
@@ -64,36 +68,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Status inválido." }, { status: 400 });
   }
 
-  const ref = db().collection("data").doc("radar-operacional");
-  const result = await db().runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(ref);
-    const data = snapshot.data() || { items: {}, updatedAt: null };
-    const items = (data.items || {}) as Record<string, RadarItem>;
+  const data = await readRadarDocument(db());
+  const items = (data.items || {}) as Record<string, RadarItem>;
 
-    if (action === "bulk_override") {
-      const ids: string[] = Array.isArray(body.ids)
-        ? Array.from(new Set<string>(body.ids.map((id: unknown) => String(id).trim()).filter(Boolean)))
-        : [];
-      let updated = 0;
-      for (const id of ids) {
-        if (!items[id]) continue;
-        items[id] = applyOverride(items[id], value);
-        updated++;
-      }
-      transaction.set(ref, { ...data, items, updatedAt: new Date().toISOString() });
-      return { ok: true as const, updated, items };
+  if (action === "bulk_override") {
+    const ids: string[] = Array.isArray(body.ids)
+      ? Array.from(new Set<string>(body.ids.map((id: unknown) => String(id).trim()).filter(Boolean)))
+      : [];
+    let updated = 0;
+    for (const id of ids) {
+      if (!items[id]) continue;
+      items[id] = applyOverride(items[id], value);
+      updated++;
     }
+    await writeRadarDocument(db(), { ...data, items, updatedAt: new Date().toISOString() });
+    return NextResponse.json({ ok: true, updated });
+  }
 
-    const id = String(body.id || "").trim();
-    if (!id || !items[id]) return { ok: false as const, status: 404, error: "Item do Radar não encontrado." };
+  const id = String(body.id || "").trim();
+  if (!id || !items[id]) return NextResponse.json({ error: "Item do Radar não encontrado." }, { status: 404 });
 
-    if (action === "set_override") items[id] = applyOverride(items[id], value);
-    else items[id] = { ...items[id], syncError: null };
+  if (action === "set_override") items[id] = applyOverride(items[id], value);
+  else items[id] = { ...items[id], syncError: null };
 
-    transaction.set(ref, { ...data, items, updatedAt: new Date().toISOString() });
-    return { ok: true as const, item: items[id] };
-  });
-
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
-  return NextResponse.json(result);
+  await writeRadarDocument(db(), { ...data, items, updatedAt: new Date().toISOString() });
+  return NextResponse.json({ ok: true, item: items[id] });
 }

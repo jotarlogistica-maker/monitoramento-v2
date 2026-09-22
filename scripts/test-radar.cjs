@@ -11,6 +11,7 @@ const moduleObj = { exports: {} };
 new Function('module', 'exports', 'require', js)(moduleObj, moduleObj.exports, (id) => {
   if (id === '@/lib/pointMetrics') return metricsModule.exports;
   if (id === '@/lib/stopsStore') return { readStopsDocument: async () => ({ stops: [], updatedAt: null }) };
+  if (id === '@/lib/radarStore') return { readRadarDocument: async () => ({ items: {} }), writeRadarDocument: async () => undefined };
   return require(id);
 });
 const { buildRadarDocument } = moduleObj.exports;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticatedRequest } from "@/lib/auth";
 import { db } from "@/lib/firebaseAdmin";
 import { clearStopsDocument } from "@/lib/stopsStore";
+import { clearRadarDocument } from "@/lib/radarStore";
 
 export async function POST(req: NextRequest) {
   if (!(await isAuthenticatedRequest(req))) {
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
     db().collection("data").doc("routes").set({ routes: [], updatedAt: null }),
     clearStopsDocument(db()),
     db().collection("data").doc("route-snapshots").set({ snapshots: {} }),
-    db().collection("data").doc("radar-operacional").set({ items: {}, updatedAt: null, sourceStopsUpdatedAt: null }),
+    clearRadarDocument(db()),
     db().collection("config").doc("scan-lock-v2").set({ token: null, acquiredAt: 0, expiresAt: 0 }),
   ]);
 

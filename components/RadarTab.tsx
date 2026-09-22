@@ -86,6 +86,16 @@ function activeStatus(status: RadarStatus): boolean {
   return ["Reatribuir", "2ª Visita", "Coletando", "Revisar"].includes(status);
 }
 
+async function responseJson(response: Response): Promise<any> {
+  const text = await response.text();
+  if (!text) throw new Error(`O servidor encerrou a resposta sem detalhes (HTTP ${response.status}). Tente novamente após o deploy.`);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`O servidor devolveu uma resposta inválida (HTTP ${response.status}).`);
+  }
+}
+
 export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onResetCursor, onSummaryChange }: Props) {
   const [items, setItems] = useState<Record<string, RadarItem>>({});
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -108,7 +118,7 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
     setLoading(true);
     try {
       const response = await fetch("/api/radar", { cache: "no-store" });
-      const data: RadarResponse & { error?: string } = await response.json();
+      const data: RadarResponse & { error?: string } = await responseJson(response);
       if (!response.ok) throw new Error(data.error || "Não foi possível carregar o Radar.");
       setItems(data.items || {});
       setUpdatedAt(data.updatedAt || null);
@@ -132,10 +142,9 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "rebuild" }),
       });
-      const data = await response.json();
+      const data = await responseJson(response);
       if (!response.ok) throw new Error(data.error || "Falha ao recalcular o Radar.");
-      setItems(data.items || {});
-      setUpdatedAt(data.updatedAt || null);
+      await loadRadar();
       setMessage("Radar recalculado com as rotas e paradas atuais.");
     } catch (error: any) {
       setMessage(error?.message || String(error));
@@ -158,7 +167,7 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ cursor, onlyIds: ids && ids.length > 0 ? ids : undefined }),
         });
-        const data = await response.json();
+        const data = await responseJson(response);
         if (!response.ok) throw new Error(data.error || "Falha ao atualizar os IDs do Radar.");
         totalErrors += data.errors || 0;
         setSyncProgress({ processed: data.processed || 0, total: data.total || 0, errors: totalErrors });
@@ -181,12 +190,12 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "bulk_override", ids: Array.from(selected), status }),
     });
-    const data = await response.json();
+    const data = await responseJson(response);
     if (!response.ok) {
       setMessage(data.error || "Não foi possível atualizar os itens selecionados.");
       return;
     }
-    setItems(data.items || {});
+    await loadRadar();
     setMessage(`${data.updated || 0} item(ns) atualizado(s).`);
   }
 
@@ -197,7 +206,7 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "set_override", id, status }),
     });
-    const data = await response.json();
+    const data = await responseJson(response);
     if (!response.ok) {
       setMessage(data.error || "Não foi possível salvar o status.");
       return;

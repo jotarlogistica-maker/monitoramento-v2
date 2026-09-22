@@ -2,6 +2,7 @@ import { db } from "@/lib/firebaseAdmin";
 import type { Route, Stop } from "@/lib/mlApi";
 import { reconcileVisitPackages } from "@/lib/pointMetrics";
 import { readStopsDocument } from "@/lib/stopsStore";
+import { readRadarDocument, writeRadarDocument } from "@/lib/radarStore";
 
 export type RadarStatus =
   | "Reatribuir"
@@ -426,22 +427,16 @@ export function buildRadarDocument(
 
 export async function rebuildRadarFromFirestore(): Promise<RadarDocument> {
   const routesRef = db().collection("data").doc("routes");
-  const radarRef = db().collection("data").doc("radar-operacional");
-  const stopsData = await readStopsDocument(db());
-
-  return db().runTransaction(async (transaction) => {
-    const [routesSnapshot, radarSnapshot] = await Promise.all([
-      transaction.get(routesRef),
-      transaction.get(radarRef),
-    ]);
-
-    const routes = (routesSnapshot.data()?.routes || []) as RouteLike[];
-    const stops = (stopsData.stops || []) as StopLike[];
-    const existingItems = (radarSnapshot.data()?.items || {}) as Record<string, RadarItem>;
-    const document = buildRadarDocument(routes, stops, existingItems, stopsData.updatedAt || null);
-    transaction.set(radarRef, document);
-    return document;
-  });
+  const [stopsData, routesSnapshot, existingDocument] = await Promise.all([
+    readStopsDocument(db()),
+    routesRef.get(),
+    readRadarDocument(db()),
+  ]);
+  const routes = (routesSnapshot.data()?.routes || []) as RouteLike[];
+  const stops = (stopsData.stops || []) as StopLike[];
+  const document = buildRadarDocument(routes, stops, existingDocument.items || {}, stopsData.updatedAt || null);
+  await writeRadarDocument(db(), document);
+  return document;
 }
 
 export function deriveRadarStatusFromApi(params: {

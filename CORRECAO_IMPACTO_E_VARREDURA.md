@@ -41,6 +41,9 @@ Também foram adicionados:
 - A leitura migra automaticamente do documento legado `data/stops` para os blocos V2, sem exigir limpeza ou troca de Firebase.
 - Campos opcionais vazios são removidos para reduzir o tamanho.
 - `data/stops` continua sendo atualizado no formato legado enquanto couber com margem segura; se atingir o limite, a V2 continua pelos blocos sem interromper a varredura e o último documento válido da V1 é preservado.
+- O Radar também usa blocos de até 80 itens, evitando que a consolidação volte a atingir o mesmo limite.
+- O botão **Recalcular da varredura** retorna uma confirmação pequena e recarrega o Radar em seguida, sem transportar todo o documento na resposta de gravação.
+- Respostas vazias do servidor agora mostram HTTP e uma mensagem compreensível em vez de `Unexpected end of JSON input`.
 
 ## Testes
 

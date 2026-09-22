@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/test-radar.cjs && node scripts/test-point-metrics.cjs && node scripts/test-operational-closing.cjs && node scripts/test-stops-store.cjs && node scripts/test-seller-monitoring.cjs && node scripts/test-seller-route-history.cjs && node scripts/test-security.cjs && node scripts/test-session-flow.cjs",
+    "test": "node scripts/test-radar.cjs && node scripts/test-radar-store.cjs && node scripts/test-point-metrics.cjs && node scripts/test-operational-closing.cjs && node scripts/test-stops-store.cjs && node scripts/test-seller-monitoring.cjs && node scripts/test-seller-route-history.cjs && node scripts/test-security.cjs && node scripts/test-session-flow.cjs",
     "check": "npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {

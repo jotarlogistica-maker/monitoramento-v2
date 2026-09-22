@@ -4,6 +4,7 @@ import { db } from "@/lib/firebaseAdmin";
 import { deriveRadarStatusFromApi, isAwaitingStatus, isCanceledStatus, isFinishedStatus, RadarItem, RadarQuality, RadarVisit } from "@/lib/radar";
 import { fetchSellerMonitoring } from "@/lib/sellerMonitoring";
 import { getMlCookie } from "@/lib/sessionStore";
+import { readRadarDocument, writeRadarDocument } from "@/lib/radarStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -115,20 +116,20 @@ export async function POST(req: NextRequest) {
   try {
     initialData = await Promise.all([
       getMlCookie(),
-      db().collection("data").doc("radar-operacional").get(),
+      readRadarDocument(db()),
       db().collection("config").doc("scan-lock-v2").get(),
     ]);
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || "Não foi possível carregar o Radar." }, { status: 500 });
   }
-  const [cookie, radarSnapshot, scanLockSnapshot] = initialData;
+  const [cookie, radarDocument, scanLockSnapshot] = initialData;
 
   if (!cookie) return NextResponse.json({ error: "Nenhuma sessão salva ainda." }, { status: 400 });
   if (Number(scanLockSnapshot.data()?.expiresAt || 0) > Date.now()) {
     return NextResponse.json({ error: "A varredura de rotas ainda está em andamento. Aguarde terminar antes de atualizar o Radar via API." }, { status: 409 });
   }
 
-  const data = radarSnapshot.data() || { items: {}, updatedAt: null };
+  const data = radarDocument;
   const items = (data.items || {}) as Record<string, RadarItem>;
   const knownIds = Object.keys(items);
   const ids: string[] = onlyIds && onlyIds.length > 0 ? onlyIds.filter((id) => knownIds.includes(id)) : knownIds;
@@ -227,26 +228,23 @@ export async function POST(req: NextRequest) {
     }
   });
 
-  const radarRef = db().collection("data").doc("radar-operacional");
-  await db().runTransaction(async (transaction) => {
-    const latestSnapshot = await transaction.get(radarRef);
-    const latestData = latestSnapshot.data() || { items: {}, updatedAt: null };
-    const latestItems = (latestData.items || {}) as Record<string, RadarItem>;
+  const latestData = await readRadarDocument(db());
+  const latestItems = (latestData.items || {}) as Record<string, RadarItem>;
 
-    for (const [id, update] of Object.entries(updates)) {
-      const latest = latestItems[id];
+  for (const [id, update] of Object.entries(updates)) {
+    const latest = latestItems[id];
       // Um reset executado durante a sincronização não deve ser desfeito por
       // uma resposta atrasada da API.
-      if (!latest) continue;
+    if (!latest) continue;
 
-      const statusOverride = latest.statusOverride ?? null;
-      const statusState = deriveRadarStatusFromApi({
+    const statusOverride = latest.statusOverride ?? null;
+    const statusState = deriveRadarStatusFromApi({
         pendingOperational: update.pendingOperational,
         nextVisit: update.nextVisit,
         quality: update.quality,
         statusOverride,
       });
-      latestItems[id] = {
+    latestItems[id] = {
         ...latest,
         ...update,
         // Evidências recém-detectadas pela varredura têm precedência sobre a
@@ -261,11 +259,10 @@ export async function POST(req: NextRequest) {
         clusters: Array.from(new Set([...(latest.clusters || []), ...(update.clusters || [])])),
         resolvedAt: statusState.active ? null : latest.resolvedAt || update.resolvedAt || Date.now(),
         ...statusState,
-      };
-    }
+    };
+  }
 
-    transaction.set(radarRef, { ...latestData, items: latestItems, updatedAt: new Date().toISOString() });
-  });
+  await writeRadarDocument(db(), { ...latestData, items: latestItems, updatedAt: new Date().toISOString() });
 
   const nextCursor = cursor + BATCH_SIZE;
   const done = nextCursor >= ids.length;
