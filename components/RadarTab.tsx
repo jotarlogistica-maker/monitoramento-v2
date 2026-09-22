@@ -105,6 +105,7 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
   const [clusterFilter, setClusterFilter] = useState("todos");
   const [reasonFilter, setReasonFilter] = useState("todos");
   const [typeFilter, setTypeFilter] = useState("todos");
+  const [minimumImpact, setMinimumImpact] = useState(0);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("pendingOperational");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
@@ -243,12 +244,13 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
       if (clusterFilter !== "todos" && row.cluster !== clusterFilter) return false;
       if (reasonFilter !== "todos" && row.trigger?.label !== reasonFilter) return false;
       if (typeFilter !== "todos" && row.type !== typeFilter) return false;
+      if ((row.pendingOperational ?? 0) < minimumImpact) return false;
       if (query && !row.name.toUpperCase().includes(query) && !row.id.toUpperCase().includes(query) && !row.rawId.toUpperCase().includes(query)) {
         return false;
       }
       return true;
     });
-  }, [rows, clusterFilter, reasonFilter, typeFilter, search]);
+  }, [rows, clusterFilter, reasonFilter, typeFilter, minimumImpact, search]);
 
   const filteredRows = useMemo(() => {
     const result = contextualRows.filter((row) => {
@@ -281,7 +283,9 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
   const clusterCards = useMemo(
     () =>
       clusters.map((cluster) => {
-        const clusterRows = rows.filter((row) => row.cluster === cluster);
+        const clusterRows = rows.filter(
+          (row) => row.cluster === cluster && (row.pendingOperational ?? 0) >= minimumImpact
+        );
         return {
           cluster,
           total: clusterRows.length,
@@ -292,7 +296,7 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
             .reduce((sum, row) => sum + (row.pendingOperational || 0), 0),
         };
       }),
-    [clusters, rows]
+    [clusters, rows, minimumImpact]
   );
 
   function toggleSort(key: SortKey) {
@@ -339,15 +343,15 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
           <div>
             <div style={{ fontWeight: 800, marginBottom: 4 }}>Radar operacional em tempo real</div>
             <div style={{ color: "var(--text-secondary)", fontSize: 13, maxWidth: 850 }}>
-              Sellers e places com pacotes pendentes após ocorrência, cancelamento ou coleta incompleta. A base é atualizada automaticamente ao atualizar as rotas; a consulta via API confirma preparado, coletado e novas visitas.
+              Pontos que apresentaram ocorrência, cancelamento, ausência ou coleta incompleta. Atualizar rotas recalcula o Radar pela varredura; a API é uma confirmação opcional do recorte filtrado para localizar métricas e novas visitas mais recentes.
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={rebuild} disabled={rebuilding || syncing} style={secondaryButton}>
               {rebuilding ? "Recalculando..." : "Recalcular da varredura"}
             </button>
-            <button onClick={() => sync()} disabled={syncing || rows.length === 0} style={button}>
-              {syncing ? "Atualizando..." : "Atualizar todos via API"}
+            <button onClick={() => sync(filteredRows.map((row) => row.id))} disabled={syncing || filteredRows.length === 0} style={button}>
+              {syncing ? "Atualizando..." : `Atualizar filtrados via API (${filteredRows.length})`}
             </button>
             <button onClick={() => sync(Array.from(selected))} disabled={syncing || selected.size === 0} style={secondaryButton}>
               Atualizar selecionados ({selected.size})
@@ -361,6 +365,9 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
               Varredura incompleta na posição {lastCursor}. <button onClick={onResetCursor} style={{ ...secondaryButton, padding: "3px 7px", marginLeft: 4 }}>reiniciar cursor</button>
             </span>
           )}
+        </div>
+        <div style={{ marginTop: 5, fontSize: 11, color: "var(--text-secondary)" }}>
+          Pontos monitorados = ativos + recuperados mantidos no histórico do dia. Use o filtro de impacto antes da API para reduzir o tempo de consulta.
         </div>
         {syncProgress && (
           <div style={{ marginTop: 8, fontSize: 12 }}>
@@ -445,6 +452,15 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
           <option value="todos">Seller e place</option>
           <option value="seller">Somente sellers</option>
           <option value="place">Somente places</option>
+        </select>
+        <select value={minimumImpact} onChange={(event) => setMinimumImpact(Number(event.target.value))} style={input}>
+          <option value={0}>Qualquer impacto</option>
+          <option value={10}>Impacto ≥ 10 pacotes</option>
+          <option value={20}>Impacto ≥ 20 pacotes</option>
+          <option value={50}>Impacto ≥ 50 pacotes</option>
+          <option value={100}>Impacto ≥ 100 pacotes</option>
+          <option value={200}>Impacto ≥ 200 pacotes</option>
+          <option value={500}>Impacto ≥ 500 pacotes</option>
         </select>
         <button onClick={selectFiltered} style={secondaryButton}>Selecionar filtrados</button>
         <button onClick={() => setSelected(new Set())} style={secondaryButton}>Limpar seleção</button>

@@ -45,6 +45,16 @@ Também foram adicionados:
 - O botão **Recalcular da varredura** retorna uma confirmação pequena e recarrega o Radar em seguida, sem transportar todo o documento na resposta de gravação.
 - Respostas vazias do servidor agora mostram HTTP e uma mensagem compreensível em vez de `Unexpected end of JSON input`.
 
+## Refinamento operacional da interface
+
+- Sellers / Places oferece ordenação explícita de impacto nos dois sentidos.
+- A transportadora de maior impacto é escolhida pela proporção pendente/preparado, considerando apenas operações com volume relevante: pelo menos 500 pacotes ou 1% do preparado total.
+- O card mantém pacotes não coletados, taxa de coleta e avanço contra a meta de 93% para contextualizar a proporção.
+- Sellers AM deixa de exibir marcadores internos de origem da API e preservação histórica na listagem principal.
+- Visão Geral e Clusters usam os totais reconciliados dos pontos, com pendência real e percentual coletado.
+- Visão Geral reúne o resumo do dia e dois detalhamentos alternáveis: Clusters e Transportadoras; os itens redundantes foram retirados do menu lateral.
+- O Radar permite filtrar um impacto mínimo e o botão principal de API atualiza apenas os casos visíveis, evitando consultar recuperados ou impactos pequenos sem necessidade.
+
 ## Testes
 
 - cenário real do C32;

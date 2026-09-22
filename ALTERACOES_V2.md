@@ -49,6 +49,12 @@
 - Diagnóstico inclui cards de fechamento para cluster e transportadora com maior impacto, usando somente pendências reconciliadas.
 - Paradas da V2 passam a ser armazenadas em blocos para não ultrapassar o limite de 1 MiB por documento do Firestore, mantendo compatibilidade legada sempre que o documento compartilhado couber.
 - Radar operacional também passa a usar armazenamento fragmentado e respostas pequenas no recálculo, eliminando falhas por documento ou resposta excessiva.
+- Sellers / Places ganha seletor explícito para ordenar o impacto do maior para o menor ou do menor para o maior.
+- O ranking de transportadoras do fechamento passa a usar impacto proporcional entre operações com volume relevante, mantendo o total absoluto como contexto.
+- Sellers AM remove indicadores técnicos da tabela e apresenta identificação, atualização e rotas de forma mais limpa.
+- Visão Geral e Clusters passam a exibir métricas reconciliadas por ponto, evitando que atribuições duplicadas reapareçam nessas telas.
+- Clusters e Transportadoras deixam de ocupar itens separados no menu e passam a ser dois detalhamentos dentro de Visão Geral.
+- Radar ganha filtro mínimo de impacto (10, 20, 50, 100, 200 ou 500 pacotes) e a atualização via API passa a consultar somente o recorte visível.
 
 ## Novos arquivos principais
 

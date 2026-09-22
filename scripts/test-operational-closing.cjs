@@ -11,7 +11,7 @@ const output = ts.transpileModule(source, {
 }).outputText;
 const moduleObject = { exports: {} };
 new Function("module", "exports", output)(moduleObject, moduleObject.exports);
-const { buildLargestImpactGroup } = moduleObject.exports;
+const { buildLargestImpactGroup, buildHighestProportionalImpactGroup } = moduleObject.exports;
 
 const rows = [
   { cluster: "C32", carrier: "A", preparado: 1946, coletado: 1945, pendente: 1 },
@@ -32,4 +32,14 @@ assert(carrier.nome === "B" && carrier.pendente === 250, "deve escolher a transp
 assert(Math.round(carrier.taxaColeta * 10) / 10 === 77.3, "deve calcular a taxa de coleta do grupo");
 assert(Math.round(carrier.percentualDaMeta * 10) / 10 === 83.1, "deve calcular quanto da meta de 93% foi alcançado");
 
-console.log("Fechamento operacional: 7 cenários aprovados.");
+const proportionalRows = [
+  { carrier: "Kangu", preparado: 100000, coletado: 96000, pendente: 4000 },
+  { carrier: "DHL", preparado: 10000, coletado: 7000, pendente: 3000 },
+  { carrier: "Operação mínima", preparado: 10, coletado: 0, pendente: 10 },
+];
+const proportional = buildHighestProportionalImpactGroup(proportionalRows, (row) => row.carrier, metrics);
+assert(proportional.nome === "DHL", "ranking proporcional não deve premiar o maior volume absoluto");
+assert(proportional.taxaImpacto === 30, "impacto proporcional deve usar pendente dividido pelo preparado");
+assert(proportional.nome !== "Operação mínima", "volume irrelevante não deve distorcer o fechamento");
+
+console.log("Fechamento operacional: 10 cenários aprovados.");

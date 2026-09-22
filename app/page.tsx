@@ -3,7 +3,7 @@ import { useEffect, useState, Fragment } from "react";
 import RadarTab from "@/components/RadarTab";
 import { reconcileVisitPackages } from "@/lib/pointMetrics";
 import { chooseOperationalRoute, clusterFromRoute } from "@/lib/sellerRouteHistory";
-import { buildLargestImpactGroup } from "@/lib/operationalClosing";
+import { buildHighestProportionalImpactGroup, buildLargestImpactGroup } from "@/lib/operationalClosing";
 
 type Route = {
   id: number;
@@ -76,6 +76,7 @@ type Tab = "visao_geral" | "radar" | "sellers" | "sellers_am" | "rotas_am" | "ro
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<Tab>("visao_geral");
+  const [overviewBreakdown, setOverviewBreakdown] = useState<"clusters" | "transportadoras">("clusters");
 
   const [routes, setRoutes] = useState<Route[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -505,6 +506,26 @@ export default function DashboardPage() {
       pctColetado: preparado > 0 ? Math.round((coletado / preparado) * 100) : 0,
     };
   });
+  const operationalClusterRows = sellerClusterSummaries.map((summary) => ({
+    ...summary,
+    rotas: routes.filter((route) => getCluster(route.routeName) === summary.cluster).length,
+  }));
+  const operationalCarrierRows = (() => {
+    const grouped = new Map<string, { carrier: string; total: number; preparado: number; coletado: number; pendente: number; reatribuir: number }>();
+    sellerRows.forEach((row) => {
+      const carrier = row.rotaOperacional?.carrierName || row.ultimaRota?.carrierName || "Sem transportadora";
+      const current = grouped.get(carrier) || { carrier, total: 0, preparado: 0, coletado: 0, pendente: 0, reatribuir: 0 };
+      current.total += 1;
+      current.preparado += row.preparado || 0;
+      current.coletado += row.coletado || 0;
+      current.pendente += row.pendente || 0;
+      if (row.temRiscoPerda) current.reatribuir += 1;
+      grouped.set(carrier, current);
+    });
+    return [...grouped.values()]
+      .map((row) => ({ ...row, pctColetado: row.preparado > 0 ? Math.round((row.coletado / row.preparado) * 100) : 0 }))
+      .sort((a, b) => b.pendente - a.pendente);
+  })();
 
   const top5Pendente = [...sellersFiltered].sort((a, b) => b.pendente - a.pendente).slice(0, 5);
 
@@ -1519,8 +1540,6 @@ export default function DashboardPage() {
     { key: "sellers_am", label: "Sellers AM" },
     { key: "rotas_am", label: "Rotas AM" },
     { key: "rotas", label: "Rotas" },
-    { key: "clusters", label: "Clusters" },
-    { key: "transportadoras", label: "Transportadoras" },
   ];
 
   return (
@@ -1751,22 +1770,53 @@ export default function DashboardPage() {
                 />
               </KpiRow>
 
-              <SectionTitle>Pacotes por cluster</SectionTitle>
+              <SectionTitle>Detalhamento operacional</SectionTitle>
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <button
+                  onClick={() => setOverviewBreakdown("clusters")}
+                  style={{ ...secondaryBtn, border: overviewBreakdown === "clusters" ? "2px solid #14161a" : "1px solid var(--border)" }}
+                >
+                  Clusters
+                </button>
+                <button
+                  onClick={() => setOverviewBreakdown("transportadoras")}
+                  style={{ ...secondaryBtn, border: overviewBreakdown === "transportadoras" ? "2px solid #14161a" : "1px solid var(--border)" }}
+                >
+                  Transportadoras
+                </button>
+              </div>
               <div style={cardStyle}>
-                <Table
-                  headers={["Cluster", "Rotas", "Sem início", "Estimado", "Coletado"]}
-                  rows={byCluster.map((c) => [
-                    c.cluster,
-                    c.rotas,
-                    c.semInicio,
-                    c.estimado.toLocaleString("pt-BR"),
-                    c.coletado.toLocaleString("pt-BR"),
-                  ])}
-                  onRowClick={(i) => {
-                    setClusterFilter(byCluster[i].cluster);
-                    setActiveTab("rotas");
-                  }}
-                />
+                {overviewBreakdown === "clusters" ? (
+                  <Table
+                    headers={["Cluster", "Pontos", "Rotas", "Preparado", "Coletado", "Pendente real", "% coletado"]}
+                    rows={operationalClusterRows.map((c) => [
+                      c.cluster,
+                      c.total,
+                      c.rotas,
+                      c.preparado.toLocaleString("pt-BR"),
+                      c.coletado.toLocaleString("pt-BR"),
+                      c.pendente.toLocaleString("pt-BR"),
+                      `${c.pctColetado}%`,
+                    ])}
+                    onRowClick={(i) => {
+                      setSellerClusterFilter(operationalClusterRows[i].cluster);
+                      setActiveTab("sellers");
+                    }}
+                  />
+                ) : (
+                  <Table
+                    headers={["Transportadora", "Pontos", "Preparado", "Coletado", "Pendente real", "% coletado", "Reatribuir"]}
+                    rows={operationalCarrierRows.map((c) => [
+                      c.carrier,
+                      c.total,
+                      c.preparado.toLocaleString("pt-BR"),
+                      c.coletado.toLocaleString("pt-BR"),
+                      c.pendente.toLocaleString("pt-BR"),
+                      `${c.pctColetado}%`,
+                      c.reatribuir,
+                    ])}
+                  />
+                )}
               </div>
             </>
           )}
@@ -1806,12 +1856,12 @@ export default function DashboardPage() {
                   (row) => row.cluster || "Sem cluster",
                   metricsOf
                 );
-                const transportadoraMaiorImpacto = buildLargestImpactGroup(
+                const transportadoraMaiorImpacto = buildHighestProportionalImpactGroup(
                   sellerRows,
                   (row) => row.rotaOperacional?.carrierName || row.ultimaRota?.carrierName || "Sem transportadora",
                   metricsOf
                 );
-                const ImpactCard = ({ titulo, item, icone }: { titulo: string; item: any; icone: string }) => (
+                const ImpactCard = ({ titulo, item, icone, proporcional = false }: { titulo: string; item: any; icone: string; proporcional?: boolean }) => (
                   <div style={{ ...cardStyle, flex: 1, minWidth: 280, padding: 18, borderTop: "4px solid var(--orange)" }}>
                     <div style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>{icone} {titulo}</div>
                     <div style={{ fontSize: 22, fontWeight: 900, margin: "6px 0" }}>{item?.nome || "Sem dados"}</div>
@@ -1824,6 +1874,11 @@ export default function DashboardPage() {
                         <div style={{ fontSize: 13, marginTop: 8 }}>
                           <b>{item.taxaColeta.toFixed(1).replace(".", ",")}%</b> coletado · <b>{item.percentualDaMeta.toFixed(1).replace(".", ",")}%</b> da meta de 93%
                         </div>
+                        {proporcional && typeof item.taxaImpacto === "number" && (
+                          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+                            {item.taxaImpacto.toFixed(1).replace(".", ",")}% de impacto proporcional · comparação entre operações com volume relevante
+                          </div>
+                        )}
                         <div style={{ fontSize: 12, color: item.faltaParaMeta > 0 ? "var(--orange)" : "var(--green)", marginTop: 4 }}>
                           {item.faltaParaMeta > 0
                             ? `Faltam ${item.faltaParaMeta.toLocaleString("pt-BR")} pacotes para a meta`
@@ -1932,7 +1987,7 @@ export default function DashboardPage() {
                     <SectionTitle>Fechamento operacional</SectionTitle>
                     <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
                       <ImpactCard titulo="Cluster com maior impacto" item={clusterMaiorImpacto} icone="📍" />
-                      <ImpactCard titulo="Transportadora com maior impacto" item={transportadoraMaiorImpacto} icone="🚚" />
+                      <ImpactCard titulo="Transportadora com maior impacto proporcional" item={transportadoraMaiorImpacto} icone="🚚" proporcional />
                     </div>
 
                     <SectionTitle>💡 Insights</SectionTitle>
@@ -2088,14 +2143,16 @@ export default function DashboardPage() {
 
           {activeTab === "sellers" && (
             <>
-              <div style={{ ...cardStyle, marginBottom: 16, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                {csvMsg && <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{csvMsg}</span>}
-                {stops.length === 0 && (
-                  <span style={{ fontSize: 12, color: "var(--orange)" }}>
-                    Sem dados de paradas ainda — use Atualizar rotas para executar a varredura e alimentar esta visão.
-                  </span>
-                )}
-              </div>
+              {(csvMsg || stops.length === 0) && (
+                <div style={{ ...cardStyle, marginBottom: 16, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  {csvMsg && <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{csvMsg}</span>}
+                  {stops.length === 0 && (
+                    <span style={{ fontSize: 12, color: "var(--orange)" }}>
+                      Sem dados de paradas ainda — use Atualizar rotas para executar a varredura e alimentar esta visão.
+                    </span>
+                  )}
+                </div>
+              )}
 
               <KpiRow>
                 <Kpi label="Sellers / Places" value={sellerKpis.total} />
@@ -2222,6 +2279,22 @@ export default function DashboardPage() {
                   {sellerClusters.map((cluster) => (
                     <option key={cluster} value={cluster}>{cluster}</option>
                   ))}
+                </select>
+                <select
+                  value={`${spSortKey}-${spSortDir}`}
+                  onChange={(e) => {
+                    const [key, direction] = e.target.value.split("-") as [typeof spSortKey, typeof spSortDir];
+                    setSpSortKey(key);
+                    setSpSortDir(direction);
+                  }}
+                  style={selectStyle}
+                  title="Ordenar os pontos da tabela"
+                >
+                  <option value="pendente-desc">Impacto: maior → menor</option>
+                  <option value="pendente-asc">Impacto: menor → maior</option>
+                  <option value="coletado-desc">Coletado: maior → menor</option>
+                  <option value="preparado-desc">Preparado: maior → menor</option>
+                  <option value="estimado-desc">Estimado: maior → menor</option>
                 </select>
                 {sellerClusterFilter !== "todos" && (
                   <button onClick={() => setSellerClusterFilter("todos")} style={{ ...secondaryBtn, padding: "6px 10px" }}>
@@ -2780,7 +2853,7 @@ export default function DashboardPage() {
                   disabled={selectedSellerAmIds.size === 0}
                   style={{ ...secondaryBtn, color: "var(--red)" }}
                 >
-                  🗑 Excluir selecionados ({selectedSellerAmIds.size})
+                  Excluir selecionados ({selectedSellerAmIds.size})
                 </button>
                 <span style={{ fontSize: 13, color: "var(--text-secondary)", marginLeft: 8 }}>Estimado até</span>
                 <input
@@ -2797,7 +2870,7 @@ export default function DashboardPage() {
                   }}
                   style={secondaryBtn}
                 >
-                  🗑 Excluir todos com Estimado ≤ {excluirEstimadoAte || 0}
+                  Excluir com estimado ≤ {excluirEstimadoAte || 0}
                 </button>
                 <button
                   onClick={() => setSelectedSellerAmIds(new Set(sellersAmFiltered.map((r) => r.id)))}
@@ -2894,38 +2967,14 @@ export default function DashboardPage() {
                                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                                   {r.id} {r.horario ? `· ${r.horario}` : ""}{" "}
                                   <span style={{ color: timeAgoColor(r.updatedAt) }}>· {timeAgo(r.updatedAt)}</span>
-                                  {String(r.resumoFonte || "").startsWith("api-direta") && (
-                                    <span
-                                      title="Atualizado direto pela API do Logistics (sem script)"
-                                      style={{
-                                        marginLeft: 6,
-                                        fontSize: 10,
-                                        fontWeight: 700,
-                                        color: "#1e40af",
-                                        background: "#dbeafe",
-                                        padding: "1px 6px",
-                                        borderRadius: 999,
-                                      }}
-                                    >
-                                      ⚡ API
-                                    </span>
-                                  )}
-                                  {r.historicoPreservado && (
-                                    <span
-                                      title="A rota finalizada não veio na resposta atual da API; os dados confirmados pela varredura foram mantidos."
-                                      style={{ marginLeft: 6, fontSize: 10, color: "#166534", fontWeight: 700 }}
-                                    >
-                                      ✓ histórico preservado
-                                    </span>
-                                  )}
                                   {r.rotas.length > 0 && (
                                     <>
-                                      {" "}
+                                      {" · "}
                                       <span
                                         onClick={() => setExpandedSellerAm(expandedSellerAm === r.id ? null : r.id)}
-                                        style={{ cursor: "pointer", color: "#2563eb" }}
+                                        style={{ cursor: "pointer", color: "var(--text-secondary)", textDecoration: "underline" }}
                                       >
-                                        🔍 {r.rotas.length} rota(s)
+                                        {r.rotas.length} rota(s)
                                       </span>
                                     </>
                                   )}
@@ -2986,9 +3035,9 @@ export default function DashboardPage() {
                                     {r.chegouAposColeta && (
                                       <div
                                         title="A rota já passou nesse horário — esse preparado chegou depois e ainda não tem coleta agendada."
-                                        style={{ fontSize: 10, color: "var(--orange)", fontWeight: 600, whiteSpace: "nowrap" }}
+                                        style={{ fontSize: 10, color: "var(--orange)", fontWeight: 600, whiteSpace: "nowrap", marginTop: 3 }}
                                       >
-                                        📦 pós-coleta
+                                        Após a coleta
                                       </div>
                                     )}
                                   </>
@@ -3599,23 +3648,24 @@ export default function DashboardPage() {
           {activeTab === "clusters" && (
             <>
               <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 16 }}>
-                Clica num cluster pra ir direto pro painel de Rotas já filtrado por ele.
+                Valores reconciliados por ponto. Uma coleta confirmada em outra rota não é contada novamente como pendência.
               </p>
               <div style={cardStyle}>
                 <Table
-                  headers={["Cluster", "Rotas", "Sem início", "Com problema", "Estimado", "Coletado"]}
-                  rows={byCluster.map((c) => [
+                  headers={["Cluster", "Pontos", "Rotas", "Preparado", "Coletado", "Pendente real", "% coletado", "Reatribuir"]}
+                  rows={operationalClusterRows.map((c) => [
                     c.cluster,
+                    c.total,
                     c.rotas,
-                    c.semInicio,
-                    c.comProblema,
-                    c.estimado.toLocaleString("pt-BR"),
+                    c.preparado.toLocaleString("pt-BR"),
                     c.coletado.toLocaleString("pt-BR"),
+                    c.pendente.toLocaleString("pt-BR"),
+                    `${c.pctColetado}%`,
+                    c.reatribuir,
                   ])}
                   onRowClick={(i) => {
-                    setClusterFilter(byCluster[i].cluster);
-                    setCarrierFilter("todas");
-                    setActiveTab("rotas");
+                    setSellerClusterFilter(operationalClusterRows[i].cluster);
+                    setActiveTab("sellers");
                   }}
                 />
               </div>
