@@ -54,6 +54,8 @@ Também foram adicionados:
 - Visão Geral e Clusters usam os totais reconciliados dos pontos, com pendência real e percentual coletado.
 - Visão Geral reúne o resumo do dia e dois detalhamentos alternáveis: Clusters e Transportadoras; os itens redundantes foram retirados do menu lateral.
 - O Radar permite filtrar um impacto mínimo e o botão principal de API atualiza apenas os casos visíveis, evitando consultar recuperados ou impactos pequenos sem necessidade.
+- O fechamento operacional apresenta oito indicadores em uma grade pronta para captura: maior impacto por cluster, transportadora proporcional, transportadora bruta, ponto, rotas no-show/canceladas, pontos sem cobertura, recuperação em outra rota e clusters abaixo da meta.
+- Impacto proporcional compara a severidade dentro do volume de cada transportadora; impacto bruto mostra quem concentra mais pacotes pendentes em números absolutos.
 
 ## Testes
 

@@ -1,6 +1,6 @@
-# Painel de Monitoramento V2 — BRRJ02
+# PULSE — First Mile Operations · BRRJ02
 
-Aplicação Next.js para monitoramento de rotas, sellers e places de First Mile. Esta versão substitui a antiga aba de ocorrências por um **Radar Operacional** e acrescenta uma visão de impacto por cluster em **Sellers / Places**.
+**Pickup Unified Logistics Surveillance & Execution.** Aplicação Next.js para monitoramento de rotas, sellers e places de First Mile. Esta versão substitui a antiga aba de ocorrências por um **Radar Operacional** e acrescenta uma visão de impacto por cluster em **Sellers / Places**.
 
 ## Principais mudanças
 
@@ -21,7 +21,7 @@ O Radar preserva o histórico do dia e acompanha os estados:
 
 Também oferece `Revisar`, `Perdido` e `Ignorado`, com distinção entre status automático e override manual.
 
-O botão **Atualizar todos via API** usa o mesmo mecanismo da Sellers AM:
+O botão **Atualizar filtrados via API** usa o mesmo mecanismo da Sellers AM:
 
 - identifica seller ou place;
 - normaliza IDs BRP;

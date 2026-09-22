@@ -1,5 +1,7 @@
 # Alterações implementadas na V2
 
+O produto passa a se chamar **PULSE — Pickup Unified Logistics Surveillance & Execution**, com nova identidade visual, favicon e assinatura `dev by Jr Araujo`.
+
 ## Funcionalidades
 
 - A aba **Ocorrências** foi substituída por **Radar operacional**.
@@ -46,7 +48,7 @@
 - Sellers AM passa a usar `coletadoCard` separado da coleta confirmada pelas rotas ao corrigir atraso do card.
 - Sellers AM preserva o histórico da varredura quando a API deixa de devolver uma rota finalizada, mantendo cluster, última rota e coleta confirmada.
 - Diagnóstico explica coletas confirmadas em outra rota e a pendência real depois de remover sobreposições entre visitas.
-- Diagnóstico inclui cards de fechamento para cluster e transportadora com maior impacto, usando somente pendências reconciliadas.
+- Diagnóstico reúne oito cards de fechamento em uma única visão: cluster de maior impacto, transportadoras de maior impacto proporcional e bruto, ponto de maior impacto, rotas no-show/canceladas, pontos sem cobertura, pacotes recuperados em outra rota e clusters abaixo da meta.
 - Paradas da V2 passam a ser armazenadas em blocos para não ultrapassar o limite de 1 MiB por documento do Firestore, mantendo compatibilidade legada sempre que o documento compartilhado couber.
 - Radar operacional também passa a usar armazenamento fragmentado e respostas pequenas no recálculo, eliminando falhas por documento ou resposta excessiva.
 - Sellers / Places ganha seletor explícito para ordenar o impacto do maior para o menor ou do menor para o maior.

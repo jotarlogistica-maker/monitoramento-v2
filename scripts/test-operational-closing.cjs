@@ -41,5 +41,7 @@ const proportional = buildHighestProportionalImpactGroup(proportionalRows, (row)
 assert(proportional.nome === "DHL", "ranking proporcional não deve premiar o maior volume absoluto");
 assert(proportional.taxaImpacto === 30, "impacto proporcional deve usar pendente dividido pelo preparado");
 assert(proportional.nome !== "Operação mínima", "volume irrelevante não deve distorcer o fechamento");
+const gross = buildLargestImpactGroup(proportionalRows, (row) => row.carrier, metrics);
+assert(gross.nome === "Kangu" && gross.pendente === 4000, "ranking bruto deve destacar o maior volume pendente absoluto");
 
-console.log("Fechamento operacional: 10 cenários aprovados.");
+console.log("Fechamento operacional: 11 cenários aprovados.");

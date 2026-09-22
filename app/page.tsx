@@ -1573,13 +1573,15 @@ export default function DashboardPage() {
               fontSize: 14,
             }}
           >
-            M2
+            <svg width="24" height="24" viewBox="0 0 64 64" aria-label="PULSE" role="img">
+              <path d="M8 34h12l6-17 10 31 7-20 5 6h8" fill="none" stroke="#14161a" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
           <div>
-            <div style={{ color: "var(--text-inverse)", fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
-              Monitoramento V2
+            <div style={{ color: "var(--text-inverse)", fontWeight: 850, fontSize: 16, lineHeight: 1.1, letterSpacing: "0.08em" }}>
+              PULSE
             </div>
-            <div style={{ color: "var(--text-inverse-muted)", fontSize: 11 }}>First Mile · BRRJ02</div>
+            <div style={{ color: "var(--text-inverse-muted)", fontSize: 10, marginTop: 3 }}>First Mile Operations · BRRJ02</div>
           </div>
         </div>
 
@@ -1861,8 +1863,32 @@ export default function DashboardPage() {
                   (row) => row.rotaOperacional?.carrierName || row.ultimaRota?.carrierName || "Sem transportadora",
                   metricsOf
                 );
+                const transportadoraMaiorImpactoBruto = buildLargestImpactGroup(
+                  sellerRows,
+                  (row) => row.rotaOperacional?.carrierName || row.ultimaRota?.carrierName || "Sem transportadora",
+                  metricsOf
+                );
+                const pontoMaiorImpacto = top5Impacto[0]
+                  ? buildLargestImpactGroup([top5Impacto[0]], (row) => row.name, metricsOf)
+                  : null;
+                const noShowPoints = sellerRows.filter((row) =>
+                  row.rotas.some((route: any) => /cancel|no[ -]?show|não compare|nao compare/i.test(String(route.status || "")))
+                );
+                const noShowRouteIds = new Set<number>();
+                noShowPoints.forEach((row) =>
+                  row.rotas.forEach((route: any) => {
+                    if (/cancel|no[ -]?show|não compare|nao compare/i.test(String(route.status || ""))) {
+                      noShowRouteIds.add(Number(route.routeId));
+                    }
+                  })
+                );
+                const noShowPending = noShowPoints.reduce((sum, row) => sum + (row.pendente || 0), 0);
+                const clustersAbaixoMeta = operationalClusterRows.filter(
+                  (cluster) => cluster.preparado > 0 && cluster.coletado / cluster.preparado < 0.93
+                );
+                const pendenteClustersAbaixoMeta = clustersAbaixoMeta.reduce((sum, cluster) => sum + cluster.pendente, 0);
                 const ImpactCard = ({ titulo, item, icone, proporcional = false }: { titulo: string; item: any; icone: string; proporcional?: boolean }) => (
-                  <div style={{ ...cardStyle, flex: 1, minWidth: 280, padding: 18, borderTop: "4px solid var(--orange)" }}>
+                  <div style={{ ...cardStyle, flex: 1, minWidth: 250, padding: 18, borderTop: "4px solid var(--orange)" }}>
                     <div style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>{icone} {titulo}</div>
                     <div style={{ fontSize: 22, fontWeight: 900, margin: "6px 0" }}>{item?.nome || "Sem dados"}</div>
                     {item && (
@@ -1887,6 +1913,16 @@ export default function DashboardPage() {
                         </div>
                       </>
                     )}
+                  </div>
+                );
+                const IndicatorCard = ({ titulo, icone, valor, unidade, detalhe, cor = "var(--red)" }: any) => (
+                  <div style={{ ...cardStyle, minWidth: 250, padding: 18, borderTop: `4px solid ${cor}` }}>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>{icone} {titulo}</div>
+                    <div style={{ fontSize: 28, fontWeight: 900, color: cor, margin: "10px 0 4px" }}>
+                      {valor}
+                      {unidade && <span style={{ fontSize: 12, color: "var(--text-secondary)", marginLeft: 6 }}>{unidade}</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{detalhe}</div>
                   </div>
                 );
 
@@ -1985,9 +2021,41 @@ export default function DashboardPage() {
                     )}
 
                     <SectionTitle>Fechamento operacional</SectionTitle>
-                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(275px, 1fr))", gap: 12, marginBottom: 24 }}>
                       <ImpactCard titulo="Cluster com maior impacto" item={clusterMaiorImpacto} icone="📍" />
                       <ImpactCard titulo="Transportadora com maior impacto proporcional" item={transportadoraMaiorImpacto} icone="🚚" proporcional />
+                      <ImpactCard titulo="Transportadora com maior impacto bruto" item={transportadoraMaiorImpactoBruto} icone="📊" />
+                      <ImpactCard titulo="Ponto com maior impacto" item={pontoMaiorImpacto} icone="📦" />
+                      <IndicatorCard
+                        titulo="Rotas no-show / canceladas"
+                        icone="🚫"
+                        valor={noShowRouteIds.size.toLocaleString("pt-BR")}
+                        unidade="rotas"
+                        detalhe={`${noShowPoints.length.toLocaleString("pt-BR")} ponto(s) · ${noShowPending.toLocaleString("pt-BR")} pacotes pendentes reais`}
+                      />
+                      <IndicatorCard
+                        titulo="Pontos sem cobertura"
+                        icone="⚠️"
+                        valor={radarSummary.active.toLocaleString("pt-BR")}
+                        unidade="pontos ativos"
+                        detalhe={`${radarSummary.pending.toLocaleString("pt-BR")} pacotes pendentes no Radar`}
+                      />
+                      <IndicatorCard
+                        titulo="Recuperados em outra rota"
+                        icone="🔄"
+                        valor={totalSobreposicaoRemovida.toLocaleString("pt-BR")}
+                        unidade="pacotes reconciliados"
+                        detalhe={`${visitasReconciliadas.length.toLocaleString("pt-BR")} ponto(s)${maiorColetaReconciliada ? ` · maior recuperação: ${maiorColetaReconciliada.name}` : ""}`}
+                        cor="var(--green)"
+                      />
+                      <IndicatorCard
+                        titulo="Clusters abaixo da meta"
+                        icone="📉"
+                        valor={clustersAbaixoMeta.length.toLocaleString("pt-BR")}
+                        unidade="clusters abaixo de 93%"
+                        detalhe={`${pendenteClustersAbaixoMeta.toLocaleString("pt-BR")} pacotes pendentes nesses clusters`}
+                        cor="var(--orange)"
+                      />
                     </div>
 
                     <SectionTitle>💡 Insights</SectionTitle>
@@ -3698,6 +3766,23 @@ export default function DashboardPage() {
             </>
           )}
         </div>
+        <footer
+          style={{
+            maxWidth: 1280,
+            margin: "0 auto",
+            padding: "8px 32px 24px",
+            width: "100%",
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            color: "var(--text-secondary)",
+            fontSize: 11,
+          }}
+        >
+          <span>PULSE · Pickup Unified Logistics Surveillance &amp; Execution</span>
+          <span>dev by Jr Araujo</span>
+        </footer>
       </main>
 
       {/* PAINEL LATERAL — Visão por cluster (Sellers AM). Só existe na tela quando aberto. */}
