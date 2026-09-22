@@ -12,6 +12,7 @@ O produto passa a se chamar **PULSE — Pickup Unified Logistics Surveillance & 
 - Atualizações concorrentes são bloqueadas e operações interrompidas possuem liberação automática.
 - Pontos em rota avulsa preservam o último cluster válido encontrado no histórico de rotas programadas.
 - Sellers / Places, Sellers AM e Radar indicam quando o cluster exibido foi recuperado do histórico do ponto.
+- Sellers AM permite selecionar vários clusters simultaneamente, com seleção visual, contador e limpeza conjunta.
 
 ## Funcionalidades
 

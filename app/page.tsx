@@ -599,8 +599,16 @@ export default function DashboardPage() {
   const [sellersAmMsg, setSellersAmMsg] = useState("");
   const [sellersAmSearch, setSellersAmSearch] = useState("");
   const [sellersAmCard, setSellersAmCard] = useState<string | null>(null);
-  const [sellersAmClusterFilter, setSellersAmClusterFilter] = useState<string>("todos");
+  const [sellersAmClusterFilter, setSellersAmClusterFilter] = useState<Set<string>>(new Set());
   const [clusterPanelOpen, setClusterPanelOpen] = useState(false);
+  function toggleSellersAmCluster(cluster: string) {
+    setSellersAmClusterFilter((current) => {
+      const next = new Set(current);
+      if (next.has(cluster)) next.delete(cluster);
+      else next.add(cluster);
+      return next;
+    });
+  }
   const [syncingApi, setSyncingApi] = useState(false);
   const [syncApiProgress, setSyncApiProgress] = useState<{ processed: number; total: number; matched: number; notFound: number; errors: number } | null>(null);
   const [syncApiResultados, setSyncApiResultados] = useState<Array<{ id: string; status: string; erro?: string }>>([]);
@@ -1076,7 +1084,7 @@ export default function DashboardPage() {
         const card = sellersAmCards.find((c) => c.key === sellersAmCard);
         if (card && !card.test(r)) return false;
       }
-      if (sellersAmClusterFilter !== "todos" && r.cluster !== sellersAmClusterFilter) return false;
+      if (sellersAmClusterFilter.size > 0 && !sellersAmClusterFilter.has(r.cluster)) return false;
       if (sellersAmSearch.trim()) {
         const q = sellersAmSearch.trim().toUpperCase();
         if (!r.name.toUpperCase().includes(q) && !r.id.includes(sellersAmSearch.trim())) return false;
@@ -2909,10 +2917,10 @@ export default function DashboardPage() {
                 style={{
                   ...secondaryBtn,
                   marginBottom: 24,
-                  borderColor: sellersAmClusterFilter !== "todos" ? "var(--accent)" : undefined,
+                  borderColor: sellersAmClusterFilter.size > 0 ? "var(--accent)" : undefined,
                 }}
               >
-                📍 Ver por cluster{sellersAmClusterFilter !== "todos" ? ` (filtrado: ${sellersAmClusterFilter})` : ""}
+                📍 Ver por cluster{sellersAmClusterFilter.size > 0 ? ` (${sellersAmClusterFilter.size} selecionado${sellersAmClusterFilter.size > 1 ? "s" : ""})` : ""}
               </button>
 
               <details style={{ marginBottom: 24 }}>
@@ -3049,12 +3057,12 @@ export default function DashboardPage() {
                   placeholder="Buscar por nome ou ID..."
                   style={{ flex: 1, minWidth: 200, padding: 9, borderRadius: 8, border: "1px solid var(--border)" }}
                 />
-                {(sellersAmCard || sellersAmClusterFilter !== "todos") && (
+                {(sellersAmCard || sellersAmClusterFilter.size > 0) && (
                   <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
                     Filtro:{" "}
                     {[
                       sellersAmCard ? sellersAmCards.find((c) => c.key === sellersAmCard)?.label : null,
-                      sellersAmClusterFilter !== "todos" ? `Cluster ${sellersAmClusterFilter}` : null,
+                      sellersAmClusterFilter.size > 0 ? `Clusters ${Array.from(sellersAmClusterFilter).sort(sortClusters).join(", ")}` : null,
                     ]
                       .filter(Boolean)
                       .join(" + ")}{" "}
@@ -3062,7 +3070,7 @@ export default function DashboardPage() {
                     <button
                       onClick={() => {
                         setSellersAmCard(null);
-                        setSellersAmClusterFilter("todos");
+                        setSellersAmClusterFilter(new Set());
                       }}
                       style={{ ...secondaryBtn, marginLeft: 8, padding: "4px 10px" }}
                     >
@@ -3219,7 +3227,7 @@ export default function DashboardPage() {
                                 <span
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setSellersAmClusterFilter(r.cluster);
+                                    toggleSellersAmCluster(r.cluster);
                                   }}
                                   style={{ cursor: "pointer", color: "#2563eb", fontWeight: 600 }}
                                   title="Filtrar pela cluster desse ponto"
@@ -3998,12 +4006,12 @@ export default function DashboardPage() {
               Cluster calculado pelas rotas programadas do histórico do ponto. Se a visita atual for avulsa, o último cluster válido é preservado. Clica numa linha pra filtrar a tabela.
             </p>
 
-            {sellersAmClusterFilter !== "todos" && (
+            {sellersAmClusterFilter.size > 0 && (
               <button
-                onClick={() => setSellersAmClusterFilter("todos")}
+                onClick={() => setSellersAmClusterFilter(new Set())}
                 style={{ ...secondaryBtn, marginBottom: 12, alignSelf: "flex-start" }}
               >
-                Limpar filtro (mostrando só {sellersAmClusterFilter})
+                Limpar clusters ({sellersAmClusterFilter.size})
               </button>
             )}
 
@@ -4011,10 +4019,7 @@ export default function DashboardPage() {
               {sellersAmPorCluster.map((c) => (
                 <div
                   key={c.cluster}
-                  onClick={() => {
-                    setSellersAmClusterFilter(c.cluster);
-                    setClusterPanelOpen(false);
-                  }}
+                  onClick={() => toggleSellersAmCluster(c.cluster)}
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
@@ -4023,12 +4028,15 @@ export default function DashboardPage() {
                     borderRadius: 8,
                     border: "1px solid var(--border)",
                     cursor: "pointer",
-                    background: sellersAmClusterFilter === c.cluster ? "#fef9c3" : "transparent",
+                    background: sellersAmClusterFilter.has(c.cluster) ? "#fef9c3" : "transparent",
                   }}
                 >
-                  <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <input type="checkbox" checked={sellersAmClusterFilter.has(c.cluster)} readOnly aria-label={`Selecionar ${c.cluster}`} />
+                    <div>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{c.cluster}</div>
                     <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{c.total} ponto(s)</div>
+                    </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: c.pendente > 0 ? "var(--red)" : "var(--green)" }}>
@@ -4041,6 +4049,9 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
+            <button onClick={() => setClusterPanelOpen(false)} style={{ ...primaryBtn, marginTop: 14 }}>
+              Aplicar seleção ({sellersAmClusterFilter.size || "todos"})
+            </button>
           </div>
         </>
       )}
