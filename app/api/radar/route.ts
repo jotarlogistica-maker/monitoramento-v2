@@ -3,6 +3,10 @@ import { isAuthenticatedRequest } from "@/lib/auth";
 import { db } from "@/lib/firebaseAdmin";
 import { RadarItem, RadarStatus, rebuildRadarFromFirestore } from "@/lib/radar";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 const ALLOWED_STATUSES: RadarStatus[] = [
   "Reatribuir",
   "2ª Visita",

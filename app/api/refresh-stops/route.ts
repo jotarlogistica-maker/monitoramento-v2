@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticatedRequest } from "@/lib/auth";
 import { db } from "@/lib/firebaseAdmin";
 import { fetchRouteDetail } from "@/lib/mlApi";
-import { rebuildRadarFromFirestore } from "@/lib/radar";
 import { getMlCookie } from "@/lib/sessionStore";
 
 export const runtime = "nodejs";
@@ -12,7 +11,7 @@ export const maxDuration = 60;
 
 const BATCH_SIZE = 10;
 const CONCURRENCY = 3;
-const LEASE_MS = 90_000;
+const LEASE_MS = 65_000;
 
 async function fetchWithLimitedConcurrency<T>(items: any[], fn: (item: any) => Promise<T>): Promise<T[]> {
   const results: T[] = [];
@@ -36,7 +35,7 @@ function routeSignature(route: any): string {
   ].join("|");
 }
 
-async function acquireLease(): Promise<string | null> {
+async function acquireLease(): Promise<{ token: string | null; retryAfterMs: number }> {
   const token = randomUUID();
   const ref = db().collection("config").doc("scan-lock-v2");
   const now = Date.now();
@@ -44,9 +43,9 @@ async function acquireLease(): Promise<string | null> {
   return db().runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
     const expiresAt = Number(snapshot.data()?.expiresAt || 0);
-    if (expiresAt > now) return null;
+    if (expiresAt > now) return { token: null, retryAfterMs: expiresAt - now };
     transaction.set(ref, { token, acquiredAt: now, expiresAt: now + LEASE_MS });
-    return token;
+    return { token, retryAfterMs: 0 };
   });
 }
 
@@ -73,7 +72,6 @@ async function persistStopsAndSnapshots(params: {
   routesProcessed: any[];
   newStops: any[];
   snapshots: Record<string, string>;
-  rebuildRadar?: boolean;
 }) {
   const { allRoutes, routesProcessed, newStops } = params;
   const currentRouteIds = new Set(allRoutes.map((route) => route.id));
@@ -89,8 +87,17 @@ async function persistStopsAndSnapshots(params: {
   const keptStops = existingStops.filter(
     (stop) => currentRouteIds.has(stop.routeId) && !processedRouteIds.has(stop.routeId)
   );
+  const routeById = new Map(allRoutes.map((route) => [Number(route.id), route]));
+  const enrichedStops = [...keptStops, ...newStops].map((stop) => {
+    const route = routeById.get(Number(stop.routeId));
+    return {
+      ...stop,
+      carrierName: route?.carrierName ?? stop.carrierName ?? null,
+      driverName: route?.driverName ?? stop.driverName ?? null,
+    };
+  });
   const updatedAt = new Date().toISOString();
-  await stopsRef.set({ stops: [...keptStops, ...newStops], updatedAt });
+  await stopsRef.set({ stops: enrichedStops, updatedAt });
 
   const currentSnapshots: Record<string, string> = currentSnapshotsSnapshot.data()?.snapshots || {};
   const validSnapshots: Record<string, string> = {};
@@ -101,7 +108,6 @@ async function persistStopsAndSnapshots(params: {
   for (const route of routesProcessed) validSnapshots[String(route.id)] = routeSignature(route);
   await snapshotsRef.set({ snapshots: validSnapshots, updatedAt });
 
-  if (params.rebuildRadar) await rebuildRadarFromFirestore();
   return updatedAt;
 }
 
@@ -134,13 +140,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Nenhuma rota carregada ainda. Clica em 'Atualizar rotas' primeiro." }, { status: 400 });
   }
 
-  const leaseToken = await acquireLease();
-  if (!leaseToken) {
+  const lease = await acquireLease();
+  if (!lease.token) {
     return NextResponse.json(
-      { error: "Já existe uma varredura em andamento. A tentativa será liberada automaticamente se a outra execução parar." },
+      {
+        error: "Já existe uma varredura em andamento. A tentativa será liberada automaticamente se a outra execução parar.",
+        retryAfterMs: lease.retryAfterMs,
+      },
       { status: 409 }
     );
   }
+  const leaseToken = lease.token;
 
   try {
     if (forceRouteIds.length > 0) {
@@ -155,7 +165,6 @@ export async function POST(req: NextRequest) {
         routesProcessed: routesToForce,
         newStops: results.flatMap((result) => result.stops),
         snapshots,
-        rebuildRadar: true,
       });
       return NextResponse.json({ ok: true, processed: routesToForce.length, total: routesToForce.length, done: true });
     }
@@ -174,10 +183,6 @@ export async function POST(req: NextRequest) {
       routesProcessed: routesToScan,
       newStops: results.flatMap((result) => result.stops),
       snapshots,
-      // Só consolida o Radar quando a fotografia do ciclo está completa. Fazer
-      // isso em cada lote poderia classificar como "sem cobertura" um seller
-      // cuja segunda visita ainda estivesse em um lote posterior.
-      rebuildRadar: done,
     });
 
     return NextResponse.json({

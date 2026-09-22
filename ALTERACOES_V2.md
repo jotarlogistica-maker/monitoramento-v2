@@ -44,6 +44,9 @@
 - Rotas que acabaram de mudar para `close` recebem uma última leitura antes de serem ignoradas.
 - Métricas ausentes permanecem `null` e entram como `Revisar`, em vez de serem convertidas silenciosamente em zero.
 - Sellers AM passa a usar `coletadoCard` separado da coleta confirmada pelas rotas ao corrigir atraso do card.
+- Sellers AM preserva o histórico da varredura quando a API deixa de devolver uma rota finalizada, mantendo cluster, última rota e coleta confirmada.
+- Diagnóstico explica coletas confirmadas em outra rota e a pendência real depois de remover sobreposições entre visitas.
+- Diagnóstico inclui cards de fechamento para cluster e transportadora com maior impacto, usando somente pendências reconciliadas.
 
 ## Novos arquivos principais
 
@@ -61,6 +64,14 @@ scripts/test-security.cjs
 ```
 
 ## Validações executadas neste pacote
+
+### Correção de reconciliação e varredura
+
+- Sellers / Places e Radar reconciliam pacotes repetidos entre rotas do mesmo ponto.
+- Coleta confirmada em uma visita abate a atribuição duplicada de uma rota cancelada.
+- Visitas ainda abertas preservam pacotes preparados depois de uma coleta anterior.
+- O Radar é consolidado depois do lote final, evitando repetição na posição 370/375.
+- A retomada usa o cursor atual sem buscar novamente a lista de rotas.
 
 - Checagem TypeScript com declarações locais de validação: aprovada.
 - Testes do motor do Radar: 11 cenários aprovados.

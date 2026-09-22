@@ -1,6 +1,9 @@
 "use client";
 import { useEffect, useState, Fragment } from "react";
 import RadarTab from "@/components/RadarTab";
+import { reconcileVisitPackages } from "@/lib/pointMetrics";
+import { chooseOperationalRoute, clusterFromRoute } from "@/lib/sellerRouteHistory";
+import { buildLargestImpactGroup } from "@/lib/operationalClosing";
 
 type Route = {
   id: number;
@@ -65,6 +68,8 @@ type Stop = {
   timeTo?: number;
   lat?: number;
   lng?: number;
+  carrierName?: string;
+  driverName?: string;
 };
 
 type Tab = "visao_geral" | "radar" | "sellers" | "sellers_am" | "rotas_am" | "rotas" | "clusters" | "transportadoras" | "diagnostico";
@@ -149,44 +154,74 @@ export default function DashboardPage() {
     setScanning(true);
     let cursor = lastCursor;
     let done = false;
-    let retriesLeft = 6; // pra rate limit (429) ou trava de outra aba — não pra sessão expirada
+    let retriesLeft = 4;
+    const leaseWaitDeadline = Date.now() + 120_000;
 
-    while (!done) {
-      const res = await fetch("/api/refresh-stops", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cursor }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        const sessaoExpirada = /401|expirad/i.test(data.error || "");
-        if (sessaoExpirada || retriesLeft <= 0) {
-          setMsg(
-            sessaoExpirada
-              ? `Sessão expirada (parou na rota ${cursor}). Cola o cookie novo e clica de novo pra continuar de onde parou.`
-              : `Erro persistente na varredura (parou na rota ${cursor}): ${data.error}`
-          );
+    try {
+      while (!done) {
+        let res: Response;
+        let data: any;
+        try {
+          res = await fetch("/api/refresh-stops", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cursor }),
+          });
+          data = await res.json().catch(() => ({}));
+        } catch (error: any) {
+          setMsg(`Falha de conexão na posição ${cursor}. Clique em Continuar varredura para retomar: ${error?.message || error}`);
           setLastCursor(cursor);
           break;
         }
-        // Rate limit ou trava concorrente: espera e tenta o mesmo lote de novo, sozinho.
-        retriesLeft--;
-        setMsg(`Servidor ocupado, tentando de novo automaticamente... (rota ${cursor})`);
-        await new Promise((resolve) => setTimeout(resolve, 8000));
-        continue;
+
+        if (!res.ok) {
+          const sessaoExpirada = /401|expirad/i.test(data.error || "");
+          if (res.status === 409 && Date.now() < leaseWaitDeadline) {
+            const waitMs = Math.min(15_000, Math.max(2_000, Number(data.retryAfterMs) || 8_000));
+            setMsg(`Outro lote ainda está terminando. Retomando automaticamente na posição ${cursor}...`);
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+            continue;
+          }
+          if (sessaoExpirada || retriesLeft <= 0) {
+            setMsg(
+              sessaoExpirada
+                ? `Sessão expirada (parou na rota ${cursor}). Cole o cookie novo e clique em Continuar varredura.`
+                : `Varredura pausada na posição ${cursor}: ${data.error || "erro do servidor"}. Clique em Continuar varredura para retomar.`
+            );
+            setLastCursor(cursor);
+            break;
+          }
+          retriesLeft--;
+          setMsg(`Falha temporária, tentando novamente... (posição ${cursor})`);
+          await new Promise((resolve) => setTimeout(resolve, 8_000));
+          continue;
+        }
+
+        retriesLeft = 4;
+        setScanProgress({ processed: data.processed, total: data.total, puladas: data.skipped ?? data.puladas });
+        done = !!data.done;
+        cursor = data.nextCursor ?? 0;
+        setLastCursor(done ? 0 : cursor);
       }
 
-      retriesLeft = 6; // resetou porque essa deu certo
-      setScanProgress({ processed: data.processed, total: data.total, puladas: data.skipped ?? data.puladas });
-      done = data.done;
-      cursor = data.nextCursor ?? 0;
-      setLastCursor(done ? 0 : cursor);
+      if (done) {
+        setMsg("Varredura de rotas concluída. Consolidando o Radar...");
+        const radarRes = await fetch("/api/radar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "rebuild" }),
+        });
+        const radarData = await radarRes.json().catch(() => ({}));
+        setMsg(
+          radarRes.ok
+            ? "Varredura completa! Radar atualizado automaticamente."
+            : `Varredura completa, mas o Radar não foi consolidado: ${radarData.error || "use Recalcular da varredura"}.`
+        );
+      }
+    } finally {
+      setScanning(false);
+      await Promise.all([loadStops(), loadRadarSummary()]);
     }
-    setScanning(false);
-    loadStops();
-    loadRadarSummary();
-    if (done) setMsg("Varredura completa! Radar atualizado automaticamente.");
   }
 
   // Força re-escanear UMA rota específica (ignora a lógica de "pular se não
@@ -203,7 +238,12 @@ export default function DashboardPage() {
     const data = await res.json();
     setReescaneandoRotaId(null);
     if (res.ok) {
-      setMsg("Rota re-escaneada! Radar recalculado.");
+      const radarRes = await fetch("/api/radar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rebuild" }),
+      });
+      setMsg(radarRes.ok ? "Rota re-escaneada! Radar recalculado." : "Rota re-escaneada. Use Recalcular da varredura no Radar.");
       loadStops();
       loadRadarSummary();
     } else {
@@ -314,6 +354,7 @@ export default function DashboardPage() {
     }
 
     return Array.from(byPoint.entries()).map(([id, pointStops]) => {
+      const routeMetadataById = new Map(routes.map((route) => [Number(route.id), route]));
       const dedupedByRoute = new Map<number, Stop>();
       for (const stop of [...pointStops].sort((a, b) => (a.timeFrom ?? 0) - (b.timeFrom ?? 0))) {
         dedupedByRoute.set(stop.routeId, stop);
@@ -321,6 +362,7 @@ export default function DashboardPage() {
       const sorted = Array.from(dedupedByRoute.values()).sort((a, b) => (a.timeFrom ?? 0) - (b.timeFrom ?? 0));
 
       const rotas = sorted.map((stop) => {
+        const routeMetadata = routeMetadataById.get(Number(stop.routeId));
         const preparadosRota = stop.preparedPackages || 0;
         const coletadosRota = stop.collectedPackages || 0;
         return {
@@ -335,17 +377,29 @@ export default function DashboardPage() {
           timeFromRaw: stop.timeFrom || 0,
           hasProblem: !!stop.hasProblem,
           problemType: stop.problemType,
+          carrierName: stop.carrierName || routeMetadata?.carrierName || "-",
+          driverName: stop.driverName || "",
         };
       });
 
       const ultimaRota = rotas[rotas.length - 1];
       const rotaAgendada = [...rotas].reverse().find((route) => route.status === "Sem Início");
-      const rotaOperacional = rotaAgendada || ultimaRota;
+      const rotaQueColetou = [...rotas].reverse().find((route) => route.coletadosRota > 0);
+      const rotaOperacional = rotaAgendada || rotaQueColetou || ultimaRota;
       const cluster = rotaOperacional?.cluster || "—";
       const clusters = Array.from(new Set(rotas.map((route) => route.cluster)));
-      const coletado = rotas.reduce((acc, route) => acc + route.coletadosRota, 0);
-      const preparado = ultimaRota ? coletado + ultimaRota.restantesRota : 0;
-      const pendente = Math.max(preparado - coletado, 0);
+      const reconciliado = reconcileVisitPackages(
+        rotas.map((route) => ({
+          prepared: route.preparadosRota,
+          collected: route.coletadosRota,
+          remaining: route.restantesRota,
+          preserveRemaining:
+            route.status === "Sem Início" || /progress|collecting|coletando|open|started/i.test(route.status),
+        }))
+      );
+      const coletado = reconciliado.collected ?? 0;
+      const preparado = reconciliado.prepared ?? 0;
+      const pendente = reconciliado.pending ?? 0;
       const estimado = sorted[0]?.estimatedPackages || 0;
       const impacto = estimado - coletado;
       const temVisitaAgendada = rotas.some((route) => route.status === "Sem Início");
@@ -380,8 +434,10 @@ export default function DashboardPage() {
         status,
         temRiscoPerda,
         dadoSuspeito,
+        sobreposicaoRemovida: reconciliado.overlapRemoved,
         rotas,
         ultimaRota,
+        rotaOperacional,
       };
     });
   })();
@@ -821,6 +877,7 @@ export default function DashboardPage() {
 
   const sellersAmRows = Object.values(sellersAm).map((s: any) => {
     const rotas = s.rotas || [];
+    const ultimaRotaOperacional = chooseOperationalRoute(rotas);
     const preparado: number | null = s.preparado ?? null;
     const coletado: number | null = s.coletado ?? null;
     // impactoBruto = valor cru que o extrator calculou (preparado - coletado, sem
@@ -876,9 +933,11 @@ export default function DashboardPage() {
     else status = "Coletado";
     if (s.statusOverride && s.statusOverride !== "Perdido") status = s.statusOverride;
 
-    // Cluster do ponto: pega da PRIMEIRA rota atribuída (rotas[0]) — mesma regra
-    // usada no resto do app (BRRJ02_C29_82 -> "C29").
-    const cluster = getCluster(rotas[0]?.rota);
+    // A resposta atual da API pode não repetir uma rota já finalizada. Usa a
+    // rota operacional escolhida do histórico mesclado e mantém o snapshot
+    // salvo como fallback, em vez de apagar cluster e última rota.
+    const clusterHistorico = clusterFromRoute(ultimaRotaOperacional);
+    const cluster = clusterHistorico !== "—" ? clusterHistorico : s.cluster || "—";
 
     // Valor absurdamente alto de verdade (tipo 9823928) — bem acima de qualquer
     // número real que já vimos (a maioria fica na casa das centenas) — indica
@@ -911,6 +970,7 @@ export default function DashboardPage() {
       chegouAposColeta,
       status,
       cluster,
+      ultimaRota: ultimaRotaOperacional || s.ultimaRota || null,
       temRiscoPerda,
       temCancelada,
       dadoSuspeito,
@@ -1289,6 +1349,11 @@ export default function DashboardPage() {
   // processo. A atualização automática de 2 em 2 min foi removida por decisão
   // do usuário — só roda quando clicado manualmente.
   async function refresh() {
+    if (lastCursor > 0) {
+      setMsg(`Retomando a varredura na posição ${lastCursor}, sem buscar uma nova lista de rotas...`);
+      await scanAllStops();
+      return;
+    }
     setRefreshingRoutes(true);
     setMsg("Buscando rotas no Mercado Livre...");
     try {
@@ -1301,6 +1366,7 @@ export default function DashboardPage() {
       setMsg(`Rotas atualizadas (${data.count})! Buscando as paradas de cada uma...`);
       loadData();
       loadPuLive(); // PU LIVE junto, sem esperar a varredura pesada terminar
+      setRefreshingRoutes(false);
       await scanAllStops();
     } catch (error: any) {
       setMsg(`Erro: ${error?.message || "não foi possível atualizar as rotas."}`);
@@ -1576,10 +1642,10 @@ export default function DashboardPage() {
             </button>
             <div style={{ position: "relative" }}>
               <button onClick={refresh} disabled={actionInProgress || scanning} style={primaryBtn}>
-                {refreshingRoutes
-                  ? "Buscando rotas..."
-                  : scanning
+                {scanning
                   ? "Varrendo paradas..."
+                  : refreshingRoutes
+                  ? "Buscando rotas..."
                   : lastCursor > 0
                   ? `Continuar varredura (rota ${lastCursor})`
                   : "Atualizar rotas"}
@@ -1726,6 +1792,48 @@ export default function DashboardPage() {
 
                 const top5Volume = [...sellerRows].sort((a, b) => (b.estimado || 0) - (a.estimado || 0)).slice(0, 5);
                 const top5Impacto = [...sellerRows].sort((a, b) => (b.pendente || 0) - (a.pendente || 0)).slice(0, 5);
+                const visitasReconciliadas = sellerRows.filter((row) => (row.sobreposicaoRemovida || 0) > 0);
+                const totalSobreposicaoRemovida = visitasReconciliadas.reduce(
+                  (acc, row) => acc + (row.sobreposicaoRemovida || 0),
+                  0
+                );
+                const maiorColetaReconciliada = [...visitasReconciliadas].sort(
+                  (a, b) => (b.sobreposicaoRemovida || 0) - (a.sobreposicaoRemovida || 0)
+                )[0];
+                const metricsOf = (row: any) => ({ pendente: row.pendente, preparado: row.preparado, coletado: row.coletado });
+                const clusterMaiorImpacto = buildLargestImpactGroup(
+                  sellerRows,
+                  (row) => row.cluster || "Sem cluster",
+                  metricsOf
+                );
+                const transportadoraMaiorImpacto = buildLargestImpactGroup(
+                  sellerRows,
+                  (row) => row.rotaOperacional?.carrierName || row.ultimaRota?.carrierName || "Sem transportadora",
+                  metricsOf
+                );
+                const ImpactCard = ({ titulo, item, icone }: { titulo: string; item: any; icone: string }) => (
+                  <div style={{ ...cardStyle, flex: 1, minWidth: 280, padding: 18, borderTop: "4px solid var(--orange)" }}>
+                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>{icone} {titulo}</div>
+                    <div style={{ fontSize: 22, fontWeight: 900, margin: "6px 0" }}>{item?.nome || "Sem dados"}</div>
+                    {item && (
+                      <>
+                        <div style={{ fontSize: 28, fontWeight: 900, color: "var(--red)" }}>
+                          {item.pendente.toLocaleString("pt-BR")}
+                          <span style={{ fontSize: 12, color: "var(--text-secondary)", marginLeft: 6 }}>pacotes não coletados</span>
+                        </div>
+                        <div style={{ fontSize: 13, marginTop: 8 }}>
+                          <b>{item.taxaColeta.toFixed(1).replace(".", ",")}%</b> coletado · <b>{item.percentualDaMeta.toFixed(1).replace(".", ",")}%</b> da meta de 93%
+                        </div>
+                        <div style={{ fontSize: 12, color: item.faltaParaMeta > 0 ? "var(--orange)" : "var(--green)", marginTop: 4 }}>
+                          {item.faltaParaMeta > 0
+                            ? `Faltam ${item.faltaParaMeta.toLocaleString("pt-BR")} pacotes para a meta`
+                            : "Meta operacional atingida"}
+                          {` · ${item.pontos} ponto(s)`}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
 
                 const piorCarrier = carriersRanked.length > 0 ? [...carriersRanked].sort((a, b) => a.pct - b.pct)[0] : null;
                 const melhorCarrier = carriersRanked.length > 0 ? [...carriersRanked].sort((a, b) => b.pct - a.pct)[0] : null;
@@ -1821,6 +1929,12 @@ export default function DashboardPage() {
                       </div>
                     )}
 
+                    <SectionTitle>Fechamento operacional</SectionTitle>
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 24 }}>
+                      <ImpactCard titulo="Cluster com maior impacto" item={clusterMaiorImpacto} icone="📍" />
+                      <ImpactCard titulo="Transportadora com maior impacto" item={transportadoraMaiorImpacto} icone="🚚" />
+                    </div>
+
                     <SectionTitle>💡 Insights</SectionTitle>
                     <div style={{ ...cardStyle, marginBottom: 24, display: "flex", flexDirection: "column", gap: 8 }}>
                       {melhorCarrier && (
@@ -1843,6 +1957,19 @@ export default function DashboardPage() {
                       {qtdReatribuir > 0 && (
                         <div style={{ fontSize: 13 }}>
                           ⚠️ <b>{qtdReatribuir}</b> seller(s)/place(s) precisam de reatribuição agora.
+                        </div>
+                      )}
+                      {totalSobreposicaoRemovida > 0 && (
+                        <div style={{ fontSize: 13 }}>
+                          🔄 <b>{totalSobreposicaoRemovida.toLocaleString("pt-BR")}</b> pacote(s) de atribuições repetidas foram
+                          reconciliados porque outra rota já confirmou a coleta em {visitasReconciliadas.length} ponto(s).
+                        </div>
+                      )}
+                      {maiorColetaReconciliada && (
+                        <div style={{ fontSize: 13 }}>
+                          ✅ <b>{maiorColetaReconciliada.name}</b>: {maiorColetaReconciliada.coletado.toLocaleString("pt-BR")} coletados
+                          de verdade; {(maiorColetaReconciliada.pendente || 0).toLocaleString("pt-BR")} pendente(s) real(is) após
+                          conciliar as visitas.
                         </div>
                       )}
                       {top5Impacto[0] && (
@@ -2259,6 +2386,14 @@ export default function DashboardPage() {
                                     style={{ cursor: "pointer", color: "#2563eb" }}
                                   >
                                     🔍 {r.rotas.length} rota(s)
+                                  </span>
+                                )}
+                                {r.sobreposicaoRemovida > 0 && (
+                                  <span
+                                    title="Pacotes repetidos em mais de uma atribuição e já cobertos por outra coleta"
+                                    style={{ marginLeft: 6, color: "var(--green)" }}
+                                  >
+                                    · {r.sobreposicaoRemovida.toLocaleString("pt-BR")} sobrepostos reconciliados
                                   </span>
                                 )}
                               </div>
@@ -2719,7 +2854,7 @@ export default function DashboardPage() {
                       </tr>
                     ) : (
                       sellersAmFiltered.map((r) => {
-                        const ultimaRota = r.rotas[r.rotas.length - 1];
+                        const ultimaRota = r.ultimaRota;
                         return (
                           <Fragment key={r.id}>
                             <tr style={{ borderTop: "1px solid var(--border)", background: r.temRiscoPerda ? "#fef2f2" : "transparent" }}>
@@ -2759,7 +2894,7 @@ export default function DashboardPage() {
                                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
                                   {r.id} {r.horario ? `· ${r.horario}` : ""}{" "}
                                   <span style={{ color: timeAgoColor(r.updatedAt) }}>· {timeAgo(r.updatedAt)}</span>
-                                  {r.resumoFonte === "api-direta" && (
+                                  {String(r.resumoFonte || "").startsWith("api-direta") && (
                                     <span
                                       title="Atualizado direto pela API do Logistics (sem script)"
                                       style={{
@@ -2773,6 +2908,14 @@ export default function DashboardPage() {
                                       }}
                                     >
                                       ⚡ API
+                                    </span>
+                                  )}
+                                  {r.historicoPreservado && (
+                                    <span
+                                      title="A rota finalizada não veio na resposta atual da API; os dados confirmados pela varredura foram mantidos."
+                                      style={{ marginLeft: 6, fontSize: 10, color: "#166534", fontWeight: 700 }}
+                                    >
+                                      ✓ histórico preservado
                                     </span>
                                   )}
                                   {r.rotas.length > 0 && (

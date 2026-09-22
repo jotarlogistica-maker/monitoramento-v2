@@ -1,5 +1,6 @@
 import { db } from "@/lib/firebaseAdmin";
 import type { Route, Stop } from "@/lib/mlApi";
+import { reconcileVisitPackages } from "@/lib/pointMetrics";
 
 export type RadarStatus =
   | "Reatribuir"
@@ -290,14 +291,18 @@ function analyzePoint(
     laterValidVisits[laterValidVisits.length - 1] ||
     null;
   const lastVisit = visits[visits.length - 1];
-  const allCollectedKnown = visits.every((visit) => visit.collected !== null);
-  const collectedObserved = allCollectedKnown ? visits.reduce((sum, visit) => sum + (visit.collected || 0), 0) : null;
-
-  // Mesma semântica usada na visão Sellers/Places: o restante da visita mais
-  // recente é o que ainda está pronto; coletas anteriores não são subtraídas de
-  // novo. A API direta substitui esses valores depois, com maior qualidade.
-  const pendingObserved = lastVisit.remaining;
-  const preparedObserved = pendingObserved === null || collectedObserved === null ? null : collectedObserved + pendingObserved;
+  const reconciled = reconcileVisitPackages(
+    visits.map((visit) => ({
+      prepared: visit.prepared,
+      collected: visit.collected,
+      remaining: visit.remaining,
+      preserveRemaining:
+        isAwaitingStatus(visit.routeStatus, visit.stopStatus) || isCollectingStatus(visit.routeStatus, visit.stopStatus),
+    }))
+  );
+  const collectedObserved = reconciled.collected;
+  const pendingObserved = reconciled.pending;
+  const preparedObserved = reconciled.prepared;
   const estimated = deduped
     .map((stop) => toNullableNumber(stop.estimatedPackages))
     .find((value): value is number => value !== null) ?? null;
@@ -307,6 +312,9 @@ function analyzePoint(
   if (collectedObserved === null) warnings.push("Existe visita sem quantidade coletada confirmada.");
   if (estimated === null) warnings.push("O estimado não foi lido nas paradas.");
   if (visits.some((visit) => visit.cluster === "—")) warnings.push("Existe rota sem cluster identificável.");
+  if (reconciled.overlapRemoved > 0) {
+    warnings.push(`${reconciled.overlapRemoved} pacote(s) sobreposto(s) entre visitas foram reconciliados.`);
+  }
 
   const routeQuality: RadarQuality = pendingObserved === null || collectedObserved === null ? "REVISAR" : "ESTIMADO";
   const effectivePending = existing?.source === "api"

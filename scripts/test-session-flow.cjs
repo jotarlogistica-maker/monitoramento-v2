@@ -46,4 +46,9 @@ for (const [name, source] of [
   assert(!source.includes('doc("scan-lock")'), `${name} não pode usar o lock legado da V1`);
 }
 
+assert(!refreshStops.includes("rebuildRadarFromFirestore"), "o lote final não pode reconstruir o Radar dentro da varredura");
+assert(page.includes('body: JSON.stringify({ action: "rebuild" })'), "a interface deve consolidar o Radar após concluir os lotes");
+assert(page.includes("if (lastCursor > 0)"), "a varredura interrompida deve retomar do cursor salvo");
+assert(page.includes('"Varrendo paradas..."'), "a interface deve distinguir varredura de busca de rotas");
+
 console.log("Fluxo de sessão, acionamento explícito e lock V2 aprovados.");

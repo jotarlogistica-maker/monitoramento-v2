@@ -4,6 +4,12 @@ import { db } from "@/lib/firebaseAdmin";
 import { fetchSellerMonitoring } from "@/lib/sellerMonitoring";
 import { normalizeId } from "@/lib/mlApi";
 import { getMlCookie } from "@/lib/sessionStore";
+import {
+  chooseOperationalRoute,
+  clusterFromRoute,
+  mergeSellerRouteHistory,
+  SellerRouteHistory,
+} from "@/lib/sellerRouteHistory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +19,48 @@ export const maxDuration = 60;
 // chama o endpoint novamente usando o cursor devolvido.
 const BATCH_SIZE = 8;
 const CONCURRENCY = 3;
+
+function formatStopTime(value: unknown): string {
+  let timestamp = Number(value || 0);
+  if (!timestamp) return "";
+  if (timestamp < 1_000_000_000_000) timestamp *= 1000;
+  return new Date(timestamp).toLocaleTimeString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function readableStopStatus(status: unknown): string {
+  const value = String(status || "").toLowerCase();
+  if (value.includes("cancel")) return "Cancelado";
+  if (value.includes("finish") || value.includes("success") || value.includes("collect")) return "Coletado";
+  if (value.includes("progress") || value.includes("start")) return "Em andamento";
+  if (value.includes("pending") || value.includes("planned") || value.includes("assign")) return "Sem Início";
+  return String(status || "");
+}
+
+function routeFromStop(stop: any, routeMetadata?: any): SellerRouteHistory {
+  const from = formatStopTime(stop.timeFrom);
+  const to = formatStopTime(stop.timeTo);
+  return {
+    rota: stop.routeName || undefined,
+    routeId: Number(stop.routeId || 0) || undefined,
+    intervalo: from && to ? `${from} a ${to}` : from || to || undefined,
+    status: readableStopStatus(stop.status),
+    statusRaw: stop.status || undefined,
+    preparadosRota: stop.preparedPackages ?? null,
+    coletadosRota: stop.collectedPackages ?? null,
+    restantesRota:
+      typeof stop.preparedPackages === "number" && typeof stop.collectedPackages === "number"
+        ? Math.max(stop.preparedPackages - stop.collectedPackages, 0)
+        : null,
+    timeFromRaw: stop.timeFrom ?? null,
+    timeToRaw: stop.timeTo ?? null,
+    carrierName: stop.carrierName || routeMetadata?.carrierName || undefined,
+    driverName: stop.driverName || routeMetadata?.driverName || undefined,
+  };
+}
 
 async function fetchWithLimitedConcurrency<T>(items: any[], fn: (item: any) => Promise<T>): Promise<T[]> {
   const results: T[] = [];
@@ -77,9 +125,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, results });
   }
 
-  const sellersDoc = await db().collection("data").doc("sellers-am").get();
+  const [sellersDoc, stopsDoc, routesDoc] = await Promise.all([
+    db().collection("data").doc("sellers-am").get(),
+    db().collection("data").doc("stops").get(),
+    db().collection("data").doc("routes").get(),
+  ]);
 
   const sellers: Record<string, any> = sellersDoc.data()?.sellers || {};
+  const stops: any[] = stopsDoc.data()?.stops || [];
+  const routeMetadataById = new Map(
+    ((routesDoc.data()?.routes || []) as any[]).map((route) => [Number(route.id), route])
+  );
+  const scannedRoutesBySeller = new Map<string, SellerRouteHistory[]>();
+  stops.forEach((stop) => {
+    const candidates = new Set(
+      [stop.normalizedId, stop.rawId]
+        .filter(Boolean)
+        .flatMap((value) => {
+          const raw = String(value);
+          return [raw, normalizeId(raw).normalized];
+        })
+    );
+    candidates.forEach((candidate) => {
+      const routes = scannedRoutesBySeller.get(candidate) || [];
+      routes.push(routeFromStop(stop, routeMetadataById.get(Number(stop.routeId))));
+      scannedRoutesBySeller.set(candidate, routes);
+    });
+  });
   const idsValidos = Object.keys(sellers);
   const allIds = Array.isArray(onlyIds) && onlyIds.length > 0 ? onlyIds.filter((id: string) => idsValidos.includes(id)) : idsValidos;
 
@@ -108,15 +180,10 @@ export async function POST(req: NextRequest) {
         return;
       }
 
-      const coletadoDasRotas = result.facilityOrders.reduce((acc, order) => acc + (order.collected || 0), 0);
-      seller.estimado = result.summary.estimado;
-      seller.preparado = result.summary.preparado;
-      seller.coletado = coletadoDasRotas;
-      seller.coletadoCard = result.summary.coletado;
-      seller.impacto = seller.preparado - seller.coletado;
-      seller.impactoNaoCalculado = false;
-      seller.rotas = result.facilityOrders.map((order) => ({
-        rota: order.routeName && order.routeName.trim() ? order.routeName : `Rota ID: ${order.routeId}`,
+      const apiRoutes: SellerRouteHistory[] = result.facilityOrders.map((order) => ({
+        // Se a API só devolver o ID, o merge mantém o nome já confirmado pela
+        // varredura em vez de trocar por um rótulo genérico.
+        rota: order.routeName && order.routeName.trim() ? order.routeName : undefined,
         routeId: order.routeId,
         intervalo: order.timeFrame,
         status: order.status,
@@ -127,13 +194,27 @@ export async function POST(req: NextRequest) {
         carrierName: order.carrierName,
         driverName: order.driverName,
       }));
+      const scannedRoutes = scannedRoutesBySeller.get(id) || [];
+      const mergedRoutes = mergeSellerRouteHistory(seller.rotas || [], scannedRoutes, apiRoutes);
+      const coletadoDasRotas = mergedRoutes.reduce((acc, route) => acc + Number(route.coletadosRota || 0), 0);
+      const operationalRoute = chooseOperationalRoute(mergedRoutes);
+      seller.estimado = result.summary.estimado;
+      seller.preparado = result.summary.preparado;
+      seller.coletado = coletadoDasRotas;
+      seller.coletadoCard = result.summary.coletado;
+      seller.impacto = seller.preparado - seller.coletado;
+      seller.impactoNaoCalculado = false;
+      seller.rotas = mergedRoutes;
+      seller.ultimaRota = operationalRoute || undefined;
+      seller.cluster = clusterFromRoute(operationalRoute);
 
       const warnings = new Set(Array.isArray(seller.avisos) ? seller.avisos : []);
       if (result.discardedOtherFacilityRoutes) warnings.add("Rota(s) de outra regional foram descartadas — confere esse ID manualmente.");
       if (result.usedRawId) warnings.add("Encontrado via ID cru (o normalizado batia com outro cliente/regional).");
       seller.avisos = Array.from(warnings);
-      seller.qualidade = result.facilityOrders.length === 0 && result.orders.length > 0 ? "REVISAR" : "OK";
-      seller.resumoFonte = "api-direta";
+      seller.historicoPreservado = result.facilityOrders.length === 0 && mergedRoutes.length > 0;
+      seller.qualidade = mergedRoutes.length === 0 && result.orders.length > 0 ? "REVISAR" : "OK";
+      seller.resumoFonte = mergedRoutes.some((route) => route.fonteHistorico === "varredura") ? "api-direta+varredura" : "api-direta";
       seller.syncError = undefined;
       seller.updatedAt = Date.now();
       matched++;

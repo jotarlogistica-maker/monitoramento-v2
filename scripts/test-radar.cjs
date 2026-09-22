@@ -2,9 +2,13 @@ const fs = require('fs');
 const ts = require('typescript');
 let source = fs.readFileSync('lib/radar.ts', 'utf8');
 source = source.replace('import { db } from "@/lib/firebaseAdmin";\n', '');
+const metricsSource = fs.readFileSync('lib/pointMetrics.ts', 'utf8');
+const metricsJs = ts.transpileModule(metricsSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+const metricsModule = { exports: {} };
+new Function('module', 'exports', 'require', metricsJs)(metricsModule, metricsModule.exports, require);
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 const moduleObj = { exports: {} };
-new Function('module', 'exports', 'require', js)(moduleObj, moduleObj.exports, require);
+new Function('module', 'exports', 'require', js)(moduleObj, moduleObj.exports, (id) => id === '@/lib/pointMetrics' ? metricsModule.exports : require(id));
 const { buildRadarDocument } = moduleObj.exports;
 function assert(condition, message) { if (!condition) throw new Error(message); }
 const routes = [
