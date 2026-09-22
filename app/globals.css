@@ -32,6 +32,7 @@ body {
   background: var(--content-bg);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  min-width: 0;
 }
 
 h1,
@@ -58,6 +59,33 @@ table {
   border-radius: 3px;
 }
 
+.mobile-menu-button,
+.mobile-nav-backdrop {
+  display: none;
+}
+
+.topbar-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pwa-install-button {
+  position: fixed;
+  right: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 80;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 16px;
+  background: var(--accent);
+  color: #14161a;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .closing-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -78,8 +106,182 @@ table {
   }
 }
 
+@media (max-width: 900px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .dashboard-shell {
+    display: block !important;
+  }
+
+  .app-sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0 !important;
+    width: min(82vw, 300px) !important;
+    height: 100dvh !important;
+    z-index: 60;
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+    box-shadow: 8px 0 30px rgba(0, 0, 0, 0.28);
+    padding-top: calc(20px + env(safe-area-inset-top)) !important;
+  }
+
+  .app-sidebar-open {
+    transform: translateX(0);
+  }
+
+  .mobile-nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    border: 0;
+    background: rgba(0, 0, 0, 0.42);
+  }
+
+  .mobile-menu-button {
+    width: 38px;
+    height: 38px;
+    padding: 9px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: white;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    flex: 0 0 auto;
+  }
+
+  .mobile-menu-button span {
+    display: block;
+    width: 18px;
+    height: 2px;
+    border-radius: 2px;
+    background: #14161a;
+  }
+
+  .app-main {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .app-topbar {
+    padding: calc(8px + env(safe-area-inset-top)) 12px 8px !important;
+    gap: 8px;
+  }
+
+  .app-topbar h1 {
+    max-width: 42vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 17px !important;
+  }
+
+  .topbar-actions {
+    margin-left: auto;
+    min-width: 0;
+  }
+
+  .topbar-message,
+  .topbar-progress,
+  .mobile-admin-action {
+    display: none;
+  }
+
+  .topbar-actions button {
+    padding: 8px 10px !important;
+    font-size: 11px !important;
+    white-space: nowrap;
+  }
+
+  .app-content {
+    width: 100%;
+    max-width: none !important;
+    padding: 12px !important;
+  }
+
+  .admin-session {
+    margin-bottom: 14px !important;
+  }
+
+  .admin-session[open] > div {
+    padding: 12px !important;
+  }
+
+  .kpi-row {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px !important;
+  }
+
+  .kpi-card {
+    min-width: 0 !important;
+    padding: 12px !important;
+  }
+
+  .kpi-card > div:last-child {
+    font-size: 21px !important;
+    overflow-wrap: anywhere;
+  }
+
+  table,
+  .responsive-table {
+    display: block;
+    width: 100%;
+    max-width: calc(100vw - 24px);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table thead,
+  table tbody {
+    min-width: 720px;
+  }
+
+  table th,
+  table td {
+    white-space: nowrap;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-size: 16px !important;
+  }
+
+  .app-footer {
+    padding: 8px 12px calc(20px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .login-shell {
+    padding: calc(20px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom));
+  }
+
+  .login-card {
+    width: min(100%, 360px) !important;
+    padding: 24px !important;
+  }
+}
+
 @media (max-width: 720px) {
   .closing-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  .kpi-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .topbar-actions button {
+    max-width: 128px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }

@@ -51,6 +51,8 @@ O produto passa a se chamar **PULSE — Pickup Unified Logistics Surveillance & 
 - Diagnóstico reúne oito cards de fechamento em uma única visão: cluster de maior impacto, transportadoras de maior impacto proporcional e bruto, ponto de maior impacto, rotas no-show/canceladas, pontos sem cobertura, pacotes recuperados em outra rota e clusters abaixo da meta.
 - O card de rotas canceladas considera somente rotas programadas: exclui avulsas e exige zero pacotes coletados, nenhuma parada bem-sucedida e todas as paradas em insucesso.
 - Os oito cards do fechamento foram compactados e equalizados em uma grade de quatro colunas por duas linhas no desktop, com adaptação automática para telas menores.
+- PULSE passa a ser uma PWA instalável no Android e iPhone, com manifesto, ícones próprios, modo standalone e service worker que não armazena dados operacionais em cache.
+- A navegação mobile usa menu lateral recolhível, cabeçalho compacto, KPIs responsivos, tabelas com rolagem por toque e proteção das ações administrativas na tela pequena.
 - Paradas da V2 passam a ser armazenadas em blocos para não ultrapassar o limite de 1 MiB por documento do Firestore, mantendo compatibilidade legada sempre que o documento compartilhado couber.
 - Radar operacional também passa a usar armazenamento fragmentado e respostas pequenas no recálculo, eliminando falhas por documento ou resposta excessiva.
 - Sellers / Places ganha seletor explícito para ordenar o impacto do maior para o menor ou do menor para o maior.

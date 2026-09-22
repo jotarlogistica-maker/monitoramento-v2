@@ -25,8 +25,9 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center" }}>
+    <div className="login-shell" style={{ display: "flex", minHeight: "100vh", alignItems: "center", justifyContent: "center" }}>
       <form
+        className="login-card"
         onSubmit={handleSubmit}
         style={{ background: "white", padding: 32, borderRadius: 12, width: 320, boxShadow: "0 2px 12px rgba(0,0,0,0.08)" }}
       >

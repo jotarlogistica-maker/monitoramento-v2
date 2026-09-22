@@ -81,6 +81,7 @@ type Tab = "visao_geral" | "radar" | "sellers" | "sellers_am" | "rotas_am" | "ro
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<Tab>("visao_geral");
   const [overviewBreakdown, setOverviewBreakdown] = useState<"clusters" | "transportadoras">("clusters");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const [routes, setRoutes] = useState<Route[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -1547,9 +1548,11 @@ export default function DashboardPage() {
   ];
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
+    <div className="dashboard-shell" style={{ display: "flex", minHeight: "100vh" }}>
+      {mobileNavOpen && <button className="mobile-nav-backdrop" aria-label="Fechar menu" onClick={() => setMobileNavOpen(false)} />}
       {/* SIDEBAR */}
       <aside
+        className={`app-sidebar${mobileNavOpen ? " app-sidebar-open" : ""}`}
         style={{
           width: 240,
           background: "var(--sidebar-bg)",
@@ -1593,7 +1596,10 @@ export default function DashboardPage() {
           {navItems.map((item) => (
             <button
               key={item.key}
-              onClick={() => setActiveTab(item.key)}
+              onClick={() => {
+                setActiveTab(item.key);
+                setMobileNavOpen(false);
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -1636,9 +1642,10 @@ export default function DashboardPage() {
       </aside>
 
       {/* MAIN */}
-      <main style={{ flex: 1, background: "var(--content-bg)", minHeight: "100vh" }}>
+      <main className="app-main" style={{ flex: 1, background: "var(--content-bg)", minHeight: "100vh" }}>
         {/* TOP BAR */}
         <div
+          className="app-topbar"
           style={{
             display: "flex",
             alignItems: "center",
@@ -1651,18 +1658,25 @@ export default function DashboardPage() {
             zIndex: 5,
           }}
         >
-          <h1 style={{ fontSize: 20, fontWeight: 700 }}>
-            {navItems.find((n) => n.key === activeTab)?.label}
-          </h1>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {msg && <span style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: 360 }}>{msg}</span>}
+          <div className="topbar-title-group">
+            <button className="mobile-menu-button" aria-label="Abrir menu" onClick={() => setMobileNavOpen(true)}>
+              <span />
+              <span />
+              <span />
+            </button>
+            <h1 style={{ fontSize: 20, fontWeight: 700 }}>
+              {navItems.find((n) => n.key === activeTab)?.label}
+            </h1>
+          </div>
+          <div className="topbar-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {msg && <span className="topbar-message" style={{ fontSize: 12, color: "var(--text-secondary)", maxWidth: 360 }}>{msg}</span>}
             {scanProgress && scanning && (
-              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              <span className="topbar-progress" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                 {scanProgress.processed}/{scanProgress.total} rotas
                 {typeof scanProgress.puladas === "number" && scanProgress.puladas > 0 ? ` · ${scanProgress.puladas} sem mudança` : ""}
               </span>
             )}
-            <button onClick={resetDay} disabled={actionInProgress || scanning} style={{ ...secondaryBtn, color: "var(--red)" }}>
+            <button className="mobile-admin-action" onClick={resetDay} disabled={actionInProgress || scanning} style={{ ...secondaryBtn, color: "var(--red)" }}>
               {resetting ? "Zerando painel..." : "Zerar painel (novo dia)"}
             </button>
             <div style={{ position: "relative" }}>
@@ -1702,9 +1716,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div style={{ padding: 32, maxWidth: 1280, margin: "0 auto" }}>
+        <div className="app-content" style={{ padding: 32, maxWidth: 1280, margin: "0 auto" }}>
           {/* SESSION BOX — sempre visível, discreto */}
-          <details style={{ marginBottom: 24 }}>
+          <details className="admin-session" style={{ marginBottom: 24 }}>
             <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--text-secondary)" }}>
               Sessão do Mercado Livre {cookie ? "" : "(clica pra colar o cookie)"}
             </summary>
@@ -3768,6 +3782,7 @@ export default function DashboardPage() {
           )}
         </div>
         <footer
+          className="app-footer"
           style={{
             maxWidth: 1280,
             margin: "0 auto",
@@ -3874,7 +3889,7 @@ export default function DashboardPage() {
 }
 
 function KpiRow({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>{children}</div>;
+  return <div className="kpi-row" style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>{children}</div>;
 }
 
 
@@ -3885,6 +3900,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function Kpi({ label, value, color, onClick, active, sub }: any) {
   return (
     <div
+      className="kpi-card"
       onClick={onClick}
       style={{
         ...cardStyle,
@@ -3916,7 +3932,7 @@ function Table({
   emptyMessage?: string;
 }) {
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+    <table className="responsive-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
       <thead>
         <tr style={{ textAlign: "left" }}>
           {headers.map((h) => (

@@ -2,6 +2,15 @@
 
 **Pickup Unified Logistics Surveillance & Execution.** Aplicação Next.js para monitoramento de rotas, sellers e places de First Mile. Esta versão substitui a antiga aba de ocorrências por um **Radar Operacional** e acrescenta uma visão de impacto por cluster em **Sellers / Places**.
 
+## Instalação no celular
+
+O PULSE funciona como PWA e usa o mesmo endereço publicado no Vercel.
+
+- Android/Chrome: abra o endereço, use **Instalar PULSE** quando aparecer ou escolha **Adicionar à tela inicial** no menu do navegador.
+- iPhone/Safari: abra o endereço, toque em **Compartilhar** e escolha **Adicionar à Tela de Início**.
+- Os dados operacionais não são armazenados para uso offline: ao abrir, o app consulta a base atual para evitar exibir números antigos.
+- A sessão do Mercado Livre permanece salva no servidor; o celular precisa somente do login do PULSE.
+
 ## Principais mudanças
 
 ### Radar Operacional
