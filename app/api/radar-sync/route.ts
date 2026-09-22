@@ -11,8 +11,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const BATCH_SIZE = 8;
-const CONCURRENCY = 3;
+const BATCH_SIZE = 4;
+const CONCURRENCY = 2;
 
 async function mapLimited<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = [];
@@ -119,7 +119,7 @@ function chooseNextVisit(item: RadarItem, apiVisits: RadarVisit[]): RadarVisit |
   return completed || null;
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   if (!(await isAuthenticatedRequest(req))) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -302,4 +302,15 @@ export async function POST(req: NextRequest) {
     nextCursor: done ? null : nextCursor,
     done,
   });
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    return await handlePost(req);
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error?.message || "Erro interno ao consultar o Radar pela API. O lote pode ser retomado." },
+      { status: 500 }
+    );
+  }
 }

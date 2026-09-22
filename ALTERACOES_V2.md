@@ -73,6 +73,10 @@ O produto passa a se chamar **PULSE — Pickup Unified Logistics Surveillance & 
 - Visão Geral e Clusters passam a exibir métricas reconciliadas por ponto, evitando que atribuições duplicadas reapareçam nessas telas.
 - Clusters e Transportadoras deixam de ocupar itens separados no menu e passam a ser dois detalhamentos dentro de Visão Geral.
 - Radar ganha filtro mínimo de impacto (10, 20, 50, 100, 200 ou 500 pacotes) e a atualização via API passa a consultar somente o recorte visível.
+- A varredura de paradas passa a trabalhar em lotes menores e isola falhas por rota: uma rota indisponível não interrompe mais toda a atualização.
+- Quando uma rota falha, o último dado válido dela é preservado e o painel informa a quantidade de falhas, sem transformar ausência de resposta em zero.
+- A atualização em tempo real do Radar usa lotes menores e tenta novamente automaticamente até três vezes quando o servidor encerra a resposta ou devolve erro temporário.
+- As APIs pesadas sempre devolvem erro em JSON, permitindo que o painel mostre a causa e retome do mesmo cursor.
 
 ## Novos arquivos principais
 
@@ -100,7 +104,8 @@ scripts/test-security.cjs
 - A retomada usa o cursor atual sem buscar novamente a lista de rotas.
 
 - Checagem TypeScript com declarações locais de validação: aprovada.
-- Testes do motor do Radar: 11 cenários aprovados.
+- Testes do motor do Radar: 14 cenários aprovados.
+- Conjunto completo: 76 cenários automatizados aprovados.
 - Testes do monitoramento compartilhado e fallback regional: 6 cenários aprovados.
 - Testes de segurança do token assinado e da criptografia: aprovados.
 - O `npm install` não concluiu neste ambiente por indisponibilidade de acesso ao registro npm; por isso o build real do Next.js deverá ser confirmado pelo GitHub Actions/Vercel após o upload.

@@ -11,14 +11,20 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const BATCH_SIZE = 10;
-const CONCURRENCY = 3;
+const BATCH_SIZE = 5;
+const CONCURRENCY = 2;
 const LEASE_MS = 65_000;
 
-async function fetchWithLimitedConcurrency<T>(items: any[], fn: (item: any) => Promise<T>): Promise<T[]> {
-  const results: T[] = [];
+async function fetchRoutesSafely(items: any[], cookie: string): Promise<Array<{ route: any; result?: any; error?: string }>> {
+  const results: Array<{ route: any; result?: any; error?: string }> = [];
   for (let index = 0; index < items.length; index += CONCURRENCY) {
-    results.push(...(await Promise.all(items.slice(index, index + CONCURRENCY).map(fn))));
+    results.push(...(await Promise.all(items.slice(index, index + CONCURRENCY).map(async (route) => {
+      try {
+        return { route, result: await fetchRouteDetail(route.id, cookie) };
+      } catch (error: any) {
+        return { route, error: error?.message || String(error) };
+      }
+    }))));
   }
   return results;
 }
@@ -115,7 +121,7 @@ async function persistStopsAndSnapshots(params: {
   return updatedAt;
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   if (!(await isAuthenticatedRequest(req))) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -176,14 +182,26 @@ export async function POST(req: NextRequest) {
       if (routesToForce.length === 0) {
         return NextResponse.json({ error: "Nenhuma dessas rotas foi encontrada na lista atual." }, { status: 400 });
       }
-      const results = await fetchWithLimitedConcurrency(routesToForce, (route) => fetchRouteDetail(route.id, cookie));
+      const outcomes = await fetchRoutesSafely(routesToForce, cookie);
+      const successful = outcomes.filter((outcome) => outcome.result);
+      const failed = outcomes.filter((outcome) => outcome.error);
+      if (successful.length === 0 && failed.length > 0) {
+        return NextResponse.json({ error: failed[0].error || "Não foi possível consultar a rota." }, { status: 502 });
+      }
       await persistStopsAndSnapshots({
         allRoutes,
-        routesProcessed: routesToForce,
-        newStops: results.flatMap((result) => result.stops),
+        routesProcessed: successful.map((outcome) => outcome.route),
+        newStops: successful.flatMap((outcome) => outcome.result.stops),
         snapshots,
       });
-      return NextResponse.json({ ok: true, processed: routesToForce.length, total: routesToForce.length, done: true });
+      return NextResponse.json({
+        ok: true,
+        processed: routesToForce.length,
+        total: routesToForce.length,
+        done: true,
+        failed: failed.length,
+        failedRoutes: failed.map((outcome) => ({ id: outcome.route.id, error: outcome.error })).slice(0, 5),
+      });
     }
 
     // O cursor percorre a lista estável de TODAS as rotas. A implementação
@@ -191,14 +209,16 @@ export async function POST(req: NextRequest) {
     const windowRoutes = allRoutes.slice(cursor, cursor + BATCH_SIZE);
     const routeIdsWithData = new Set(existingStops.map((stop: any) => stop.routeId));
     const routesToScan = windowRoutes.filter((route) => shouldScanRoute(route, routeIdsWithData, snapshots));
-    const results = await fetchWithLimitedConcurrency(routesToScan, (route) => fetchRouteDetail(route.id, cookie));
+    const outcomes = await fetchRoutesSafely(routesToScan, cookie);
+    const successful = outcomes.filter((outcome) => outcome.result);
+    const failed = outcomes.filter((outcome) => outcome.error);
     const nextCursor = cursor + BATCH_SIZE;
     const done = nextCursor >= allRoutes.length;
 
     await persistStopsAndSnapshots({
       allRoutes,
-      routesProcessed: routesToScan,
-      newStops: results.flatMap((result) => result.stops),
+      routesProcessed: successful.map((outcome) => outcome.route),
+      newStops: successful.flatMap((outcome) => outcome.result.stops),
       snapshots,
     });
 
@@ -215,6 +235,9 @@ export async function POST(req: NextRequest) {
       ok: true,
       processed: Math.min(nextCursor, allRoutes.length),
       scanned: routesToScan.length,
+      succeeded: successful.length,
+      failed: failed.length,
+      failedRoutes: failed.map((outcome) => ({ id: outcome.route.id, error: outcome.error })).slice(0, 5),
       skipped: windowRoutes.length - routesToScan.length,
       total: allRoutes.length,
       nextCursor: done ? null : nextCursor,
@@ -224,5 +247,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error?.message || "Erro ao buscar paradas." }, { status: 502 });
   } finally {
     await releaseLease(leaseToken).catch(() => undefined);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    return await handlePost(req);
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error?.message || "Erro interno ao atualizar as paradas. Tente continuar a varredura." },
+      { status: 500 }
+    );
   }
 }

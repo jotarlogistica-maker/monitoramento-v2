@@ -163,13 +163,29 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
     let totalErrors = 0;
     try {
       while (!done) {
-        const response = await fetch("/api/radar-sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cursor, onlyIds: ids && ids.length > 0 ? ids : undefined }),
-        });
-        const data = await responseJson(response);
-        if (!response.ok) throw new Error(data.error || "Falha ao atualizar os IDs do Radar.");
+        let data: any = null;
+        let lastError: Error | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const response = await fetch("/api/radar-sync", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify({ cursor, onlyIds: ids && ids.length > 0 ? ids : undefined }),
+            });
+            data = await responseJson(response);
+            if (!response.ok) throw new Error(data.error || "Falha ao atualizar os IDs do Radar.");
+            lastError = null;
+            break;
+          } catch (error: any) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            if (attempt < 2) {
+              setMessage(`Servidor ocupado no lote ${cursor}. Tentando novamente (${attempt + 2}/3)...`);
+              await new Promise((resolve) => setTimeout(resolve, 1_500 * (attempt + 1)));
+            }
+          }
+        }
+        if (lastError || !data) throw lastError || new Error("Falha ao atualizar os IDs do Radar.");
         totalErrors += data.errors || 0;
         setSyncProgress({ processed: data.processed || 0, total: data.total || 0, errors: totalErrors });
         done = !!data.done;

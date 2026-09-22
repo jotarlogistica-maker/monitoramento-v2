@@ -144,7 +144,7 @@ export default function DashboardPage() {
   const [stopsUpdatedAt, setStopsUpdatedAt] = useState<string | null>(null);
   const [radarSummary, setRadarSummary] = useState({ total: 0, active: 0, pending: 0 });
   const [scanning, setScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState<{ processed: number; total: number; puladas?: number } | null>(null);
+  const [scanProgress, setScanProgress] = useState<{ processed: number; total: number; puladas?: number; falhas?: number } | null>(null);
 
   const [search, setSearch] = useState("");
   const [lastCursor, setLastCursor] = useState(0);
@@ -179,6 +179,7 @@ export default function DashboardPage() {
     let cursor = lastCursor;
     let done = false;
     let retriesLeft = 4;
+    let failedRoutes = 0;
     const leaseWaitDeadline = Date.now() + 120_000;
 
     try {
@@ -222,7 +223,13 @@ export default function DashboardPage() {
         }
 
         retriesLeft = 4;
-        setScanProgress({ processed: data.processed, total: data.total, puladas: data.skipped ?? data.puladas });
+        failedRoutes += Number(data.failed || 0);
+        setScanProgress({
+          processed: data.processed,
+          total: data.total,
+          puladas: data.skipped ?? data.puladas,
+          falhas: failedRoutes,
+        });
         done = !!data.done;
         cursor = data.nextCursor ?? 0;
         setLastCursor(done ? 0 : cursor);
@@ -242,12 +249,18 @@ export default function DashboardPage() {
           body: JSON.stringify({
             action: "finish",
             operationId,
-            message: radarRes.ok ? "Rotas, paradas e Radar atualizados." : "Rotas e paradas atualizadas; o Radar precisa ser recalculado.",
+            message: radarRes.ok
+              ? failedRoutes > 0
+                ? `Atualização concluída; ${failedRoutes} rota(s) não responderam e mantiveram os dados anteriores.`
+                : "Rotas, paradas e Radar atualizados."
+              : "Rotas e paradas atualizadas; o Radar precisa ser recalculado.",
           }),
         });
         setMsg(
           radarRes.ok
-            ? "Varredura completa! Radar atualizado automaticamente."
+            ? failedRoutes > 0
+              ? `Varredura concluída. ${failedRoutes} rota(s) não responderam; os dados anteriores delas foram preservados. Radar atualizado com as demais.`
+              : "Varredura completa! Radar atualizado automaticamente."
             : `Varredura completa, mas o Radar não foi consolidado: ${radarData.error || "use Recalcular da varredura"}.`
         );
       } else {
@@ -1807,6 +1820,7 @@ export default function DashboardPage() {
               <span className="topbar-progress" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                 {scanProgress.processed}/{scanProgress.total} rotas
                 {typeof scanProgress.puladas === "number" && scanProgress.puladas > 0 ? ` · ${scanProgress.puladas} sem mudança` : ""}
+                {typeof scanProgress.falhas === "number" && scanProgress.falhas > 0 ? ` · ${scanProgress.falhas} falha(s) preservada(s)` : ""}
               </span>
             )}
             <button className="mobile-admin-action" onClick={resetDay} disabled={actionInProgress || scanning} style={{ ...secondaryBtn, color: "var(--red)" }}>
