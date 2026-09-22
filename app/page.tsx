@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, Fragment } from "react";
 import RadarTab from "@/components/RadarTab";
+import CopyableId from "@/components/CopyableId";
 import { reconcileVisitPackages } from "@/lib/pointMetrics";
 import { chooseOperationalRoute, resolveClusterFromHistory } from "@/lib/sellerRouteHistory";
 import {
@@ -2701,7 +2702,7 @@ export default function DashboardPage() {
                                 {r.name} {r.dadoSuspeito && <span title="Dado suspeito">🚩</span>}
                               </div>
                               <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                                {r.id}{" "}
+                                <CopyableId value={r.id} />{" "}
                                 {r.rotas.length > 0 && (
                                   <span
                                     onClick={() => setExpandedSeller(expandedSeller === r.id ? null : r.id)}
@@ -3222,7 +3223,7 @@ export default function DashboardPage() {
                                   )}
                                 </div>
                                 <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                                  {r.id} {r.horario ? `· ${r.horario}` : ""}{" "}
+                                  <CopyableId value={r.id} /> {r.horario ? `· ${r.horario}` : ""}{" "}
                                   <span style={{ color: timeAgoColor(r.updatedAt) }}>· {timeAgo(r.updatedAt)}</span>
                                   {r.rotas.length > 0 && (
                                     <>

@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import type { RadarItem, RadarStatus } from "@/lib/radar";
+import CopyableId from "@/components/CopyableId";
 
 type RadarResponse = {
   items?: Record<string, RadarItem>;
@@ -515,8 +516,17 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
                   <td style={td}>
                     <button onClick={() => toggleExpanded(row.id)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer", color: "inherit" }}>
                       <div style={{ fontWeight: 800 }}>{row.name}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>{row.id} · {row.type === "place" ? "Place" : "Seller"} · {expanded.has(row.id) ? "ocultar" : "detalhes"}</div>
                     </button>
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                      <CopyableId value={row.rawId || row.id} /> · {row.type === "place" ? "Place" : "Seller"} ·{" "}
+                      <button
+                        type="button"
+                        onClick={() => toggleExpanded(row.id)}
+                        style={{ border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", cursor: "pointer", textDecoration: "underline" }}
+                      >
+                        {expanded.has(row.id) ? "ocultar" : "detalhes"}
+                      </button>
+                    </div>
                   </td>
                   <td style={td}>
                     <button onClick={() => setClusterFilter(row.cluster)} style={{ ...secondaryButton, padding: "4px 8px" }}>{row.cluster}</button>

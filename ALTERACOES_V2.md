@@ -77,6 +77,7 @@ O produto passa a se chamar **PULSE — Pickup Unified Logistics Surveillance & 
 - Quando uma rota falha, o último dado válido dela é preservado e o painel informa a quantidade de falhas, sem transformar ausência de resposta em zero.
 - A atualização em tempo real do Radar usa lotes menores e tenta novamente automaticamente até três vezes quando o servidor encerra a resposta ou devolve erro temporário.
 - As APIs pesadas sempre devolvem erro em JSON, permitindo que o painel mostre a causa e retome do mesmo cursor.
+- IDs de sellers e places passam a ser copiados com um clique no Radar, Sellers / Places e Sellers AM, com confirmação visual imediata também no celular.
 
 ## Novos arquivos principais
 
