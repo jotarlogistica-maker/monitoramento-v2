@@ -56,6 +56,8 @@ Também foram adicionados:
 - O Radar permite filtrar um impacto mínimo e o botão principal de API atualiza apenas os casos visíveis, evitando consultar recuperados ou impactos pequenos sem necessidade.
 - O fechamento operacional apresenta oito indicadores em uma grade pronta para captura: maior impacto por cluster, transportadora proporcional, transportadora bruta, ponto, rotas no-show/canceladas, pontos sem cobertura, recuperação em outra rota e clusters abaixo da meta.
 - Impacto proporcional compara a severidade dentro do volume de cada transportadora; impacto bruto mostra quem concentra mais pacotes pendentes em números absolutos.
+- “Rotas canceladas (no-show)” não usa apenas o texto do status: conta somente rota regular com cluster no nome, zero coleta, nenhuma parada bem-sucedida e insucesso em todas as paradas. Rotas avulsas/spot/não planejadas são descartadas.
+- A grade do fechamento usa oito cards compactos e de altura proporcional, organizados em quatro colunas por duas linhas no desktop para facilitar o print operacional.
 
 ## Testes
 

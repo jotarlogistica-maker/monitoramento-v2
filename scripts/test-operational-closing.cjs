@@ -11,7 +11,7 @@ const output = ts.transpileModule(source, {
 }).outputText;
 const moduleObject = { exports: {} };
 new Function("module", "exports", output)(moduleObject, moduleObject.exports);
-const { buildLargestImpactGroup, buildHighestProportionalImpactGroup } = moduleObject.exports;
+const { buildLargestImpactGroup, buildHighestProportionalImpactGroup, isScheduledCancelledRoute } = moduleObject.exports;
 
 const rows = [
   { cluster: "C32", carrier: "A", preparado: 1946, coletado: 1945, pendente: 1 },
@@ -44,4 +44,35 @@ assert(proportional.nome !== "Operação mínima", "volume irrelevante não deve
 const gross = buildLargestImpactGroup(proportionalRows, (row) => row.carrier, metrics);
 assert(gross.nome === "Kangu" && gross.pendente === 4000, "ranking bruto deve destacar o maior volume pendente absoluto");
 
-console.log("Fechamento operacional: 11 cenários aprovados.");
+assert(
+  isScheduledCancelledRoute({
+    routeName: "BRRJ02_C32_DED_49",
+    totalStops: 12,
+    successfulStops: 0,
+    failedStops: 12,
+    collectedPackages: 0,
+  }),
+  "deve contar rota programada sem coleta e com todas as paradas em insucesso"
+);
+assert(
+  !isScheduledCancelledRoute({
+    routeName: "Rota não planejada (123)",
+    totalStops: 12,
+    successfulStops: 0,
+    failedStops: 12,
+    collectedPackages: 0,
+  }),
+  "não deve contar rota avulsa"
+);
+assert(
+  !isScheduledCancelledRoute({
+    routeName: "BRRJ02_C32_DED_50",
+    totalStops: 12,
+    successfulStops: 1,
+    failedStops: 11,
+    collectedPackages: 1,
+  }),
+  "não deve contar rota que teve qualquer coleta ou parada bem-sucedida"
+);
+
+console.log("Fechamento operacional: 14 cenários aprovados.");

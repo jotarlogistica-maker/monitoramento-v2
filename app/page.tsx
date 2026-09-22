@@ -3,7 +3,11 @@ import { useEffect, useState, Fragment } from "react";
 import RadarTab from "@/components/RadarTab";
 import { reconcileVisitPackages } from "@/lib/pointMetrics";
 import { chooseOperationalRoute, clusterFromRoute } from "@/lib/sellerRouteHistory";
-import { buildHighestProportionalImpactGroup, buildLargestImpactGroup } from "@/lib/operationalClosing";
+import {
+  buildHighestProportionalImpactGroup,
+  buildLargestImpactGroup,
+  isScheduledCancelledRoute,
+} from "@/lib/operationalClosing";
 
 type Route = {
   id: number;
@@ -1871,41 +1875,38 @@ export default function DashboardPage() {
                 const pontoMaiorImpacto = top5Impacto[0]
                   ? buildLargestImpactGroup([top5Impacto[0]], (row) => row.name, metricsOf)
                   : null;
-                const noShowPoints = sellerRows.filter((row) =>
-                  row.rotas.some((route: any) => /cancel|no[ -]?show|não compare|nao compare/i.test(String(route.status || "")))
+                const cancelledScheduledRoutes = routes.filter(isScheduledCancelledRoute);
+                const cancelledScheduledRouteIds = new Set(cancelledScheduledRoutes.map((route) => Number(route.id)));
+                const cancelledScheduledPoints = sellerRows.filter((row) =>
+                  row.rotas.some((route: any) => cancelledScheduledRouteIds.has(Number(route.routeId)))
                 );
-                const noShowRouteIds = new Set<number>();
-                noShowPoints.forEach((row) =>
-                  row.rotas.forEach((route: any) => {
-                    if (/cancel|no[ -]?show|não compare|nao compare/i.test(String(route.status || ""))) {
-                      noShowRouteIds.add(Number(route.routeId));
-                    }
-                  })
+                const cancelledScheduledPending = cancelledScheduledPoints.reduce(
+                  (sum, row) => sum + (row.pendente || 0),
+                  0
                 );
-                const noShowPending = noShowPoints.reduce((sum, row) => sum + (row.pendente || 0), 0);
                 const clustersAbaixoMeta = operationalClusterRows.filter(
                   (cluster) => cluster.preparado > 0 && cluster.coletado / cluster.preparado < 0.93
                 );
                 const pendenteClustersAbaixoMeta = clustersAbaixoMeta.reduce((sum, cluster) => sum + cluster.pendente, 0);
                 const ImpactCard = ({ titulo, item, icone, proporcional = false }: { titulo: string; item: any; icone: string; proporcional?: boolean }) => (
-                  <div style={{ ...cardStyle, flex: 1, minWidth: 250, padding: 18, borderTop: "4px solid var(--orange)" }}>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>{icone} {titulo}</div>
-                    <div style={{ fontSize: 22, fontWeight: 900, margin: "6px 0" }}>{item?.nome || "Sem dados"}</div>
+                  <div className="closing-card" style={{ ...cardStyle, flex: 1, borderTop: "4px solid var(--orange)" }}>
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 700 }}>{icone} {titulo}</div>
+                    <div style={{ fontSize: 18, lineHeight: 1.15, fontWeight: 900, margin: "5px 0" }}>{item?.nome || "Sem dados"}</div>
                     {item && (
                       <>
-                        <div style={{ fontSize: 28, fontWeight: 900, color: "var(--red)" }}>
+                        <div style={{ fontSize: 23, fontWeight: 900, color: "var(--red)" }}>
                           {item.pendente.toLocaleString("pt-BR")}
-                          <span style={{ fontSize: 12, color: "var(--text-secondary)", marginLeft: 6 }}>pacotes não coletados</span>
+                          <span style={{ fontSize: 11, color: "var(--text-secondary)", marginLeft: 5 }}>pacotes não coletados</span>
                         </div>
-                        <div style={{ fontSize: 13, marginTop: 8 }}>
+                        <div style={{ fontSize: 11, marginTop: 6 }}>
                           <b>{item.taxaColeta.toFixed(1).replace(".", ",")}%</b> coletado · <b>{item.percentualDaMeta.toFixed(1).replace(".", ",")}%</b> da meta de 93%
                         </div>
                         {proporcional && typeof item.taxaImpacto === "number" && (
-                          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
+                          <div style={{ fontSize: 10, lineHeight: 1.3, color: "var(--text-secondary)", marginTop: 3 }}>
                             {item.taxaImpacto.toFixed(1).replace(".", ",")}% de impacto proporcional · comparação entre operações com volume relevante
                           </div>
                         )}
-                        <div style={{ fontSize: 12, color: item.faltaParaMeta > 0 ? "var(--orange)" : "var(--green)", marginTop: 4 }}>
+                        <div style={{ fontSize: 10, color: item.faltaParaMeta > 0 ? "var(--orange)" : "var(--green)", marginTop: 3 }}>
                           {item.faltaParaMeta > 0
                             ? `Faltam ${item.faltaParaMeta.toLocaleString("pt-BR")} pacotes para a meta`
                             : "Meta operacional atingida"}
@@ -1916,13 +1917,13 @@ export default function DashboardPage() {
                   </div>
                 );
                 const IndicatorCard = ({ titulo, icone, valor, unidade, detalhe, cor = "var(--red)" }: any) => (
-                  <div style={{ ...cardStyle, minWidth: 250, padding: 18, borderTop: `4px solid ${cor}` }}>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 700 }}>{icone} {titulo}</div>
-                    <div style={{ fontSize: 28, fontWeight: 900, color: cor, margin: "10px 0 4px" }}>
+                  <div className="closing-card" style={{ ...cardStyle, borderTop: `4px solid ${cor}` }}>
+                    <div style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 700 }}>{icone} {titulo}</div>
+                    <div style={{ fontSize: 23, fontWeight: 900, color: cor, margin: "7px 0 3px" }}>
                       {valor}
-                      {unidade && <span style={{ fontSize: 12, color: "var(--text-secondary)", marginLeft: 6 }}>{unidade}</span>}
+                      {unidade && <span style={{ fontSize: 11, color: "var(--text-secondary)", marginLeft: 5 }}>{unidade}</span>}
                     </div>
-                    <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{detalhe}</div>
+                    <div style={{ fontSize: 10, lineHeight: 1.35, color: "var(--text-secondary)" }}>{detalhe}</div>
                   </div>
                 );
 
@@ -2021,17 +2022,17 @@ export default function DashboardPage() {
                     )}
 
                     <SectionTitle>Fechamento operacional</SectionTitle>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(275px, 1fr))", gap: 12, marginBottom: 24 }}>
+                    <div className="closing-grid">
                       <ImpactCard titulo="Cluster com maior impacto" item={clusterMaiorImpacto} icone="📍" />
                       <ImpactCard titulo="Transportadora com maior impacto proporcional" item={transportadoraMaiorImpacto} icone="🚚" proporcional />
                       <ImpactCard titulo="Transportadora com maior impacto bruto" item={transportadoraMaiorImpactoBruto} icone="📊" />
                       <ImpactCard titulo="Ponto com maior impacto" item={pontoMaiorImpacto} icone="📦" />
                       <IndicatorCard
-                        titulo="Rotas no-show / canceladas"
+                        titulo="Rotas canceladas (no-show)"
                         icone="🚫"
-                        valor={noShowRouteIds.size.toLocaleString("pt-BR")}
+                        valor={cancelledScheduledRoutes.length.toLocaleString("pt-BR")}
                         unidade="rotas"
-                        detalhe={`${noShowPoints.length.toLocaleString("pt-BR")} ponto(s) · ${noShowPending.toLocaleString("pt-BR")} pacotes pendentes reais`}
+                        detalhe={`${cancelledScheduledPoints.length.toLocaleString("pt-BR")} ponto(s) · ${cancelledScheduledPending.toLocaleString("pt-BR")} pendentes reais · somente programadas, com zero coleta e todas as paradas em insucesso`}
                       />
                       <IndicatorCard
                         titulo="Pontos sem cobertura"

@@ -11,6 +11,38 @@ export type OperationalImpactGroup = {
   volumeMinimoComparacao?: number;
 };
 
+export type RouteClosingSummary = {
+  routeName?: string | null;
+  totalStops?: number | null;
+  successfulStops?: number | null;
+  failedStops?: number | null;
+  collectedPackages?: number | null;
+};
+
+/**
+ * Uma rota cancelada/no-show operacional é uma rota programada, nunca uma
+ * avulsa, que terminou sem coletar pacote algum e com todas as paradas em
+ * insucesso. O cluster no nome identifica a programação regular da rota.
+ */
+export function isScheduledCancelledRoute(route: RouteClosingSummary): boolean {
+  const routeName = String(route.routeName || "").trim();
+  const isAdHoc = /avulsa|spot|não planejada|nao planejada/i.test(routeName);
+  const isScheduled = routeName.split("_").some((part) => /^C\d+$/i.test(part));
+  const totalStops = Number(route.totalStops || 0);
+  const successfulStops = Number(route.successfulStops || 0);
+  const failedStops = Number(route.failedStops || 0);
+  const collectedPackages = Number(route.collectedPackages || 0);
+
+  return (
+    isScheduled &&
+    !isAdHoc &&
+    totalStops > 0 &&
+    collectedPackages === 0 &&
+    successfulStops === 0 &&
+    failedStops >= totalStops
+  );
+}
+
 /** Consolida pontos já reconciliados e devolve o grupo com mais pacotes pendentes. */
 export function buildLargestImpactGroup<T>(
   rows: T[],
