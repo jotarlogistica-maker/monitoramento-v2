@@ -504,6 +504,14 @@ export default function RadarTab({ stopsUpdatedAt, stopsCount, lastCursor, onRes
                   </td>
                   <td style={td}>
                     <button onClick={() => setClusterFilter(row.cluster)} style={{ ...secondaryButton, padding: "4px 8px" }}>{row.cluster}</button>
+                    {row.clusterFromHistory && (
+                      <div
+                        title={row.clusterSourceRouteName ? `Cluster recuperado da rota ${row.clusterSourceRouteName}` : "Cluster recuperado do histórico do ponto"}
+                        style={{ fontSize: 10, color: "var(--orange)", marginTop: 3 }}
+                      >
+                        histórico do ponto
+                      </div>
+                    )}
                     {row.originCluster !== row.currentCluster && <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 3 }}>{row.originCluster} → {row.currentCluster}</div>}
                   </td>
                   <td style={td}>

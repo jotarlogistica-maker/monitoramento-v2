@@ -100,6 +100,56 @@ table {
   padding: 13px !important;
 }
 
+.pu-live-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  width: auto;
+  max-width: 100%;
+}
+
+.pu-live-metrics {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.pu-live-column {
+  min-width: 90px;
+}
+
+.pu-live-refresh {
+  flex: 0 0 auto;
+}
+
+.shared-update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 7px 16px;
+  color: #5c4b00;
+  background: #fff9cc;
+  border-bottom: 1px solid #f0df62;
+  font-size: 12px;
+}
+
+.shared-update-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--orange);
+  box-shadow: 0 0 0 0 rgba(239, 108, 0, 0.45);
+  animation: shared-update-pulse 1.4s infinite;
+}
+
+@keyframes shared-update-pulse {
+  70% { box-shadow: 0 0 0 7px rgba(239, 108, 0, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 108, 0, 0); }
+}
+
 @media (max-width: 1180px) {
   .closing-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -201,6 +251,63 @@ table {
     width: 100%;
     max-width: none !important;
     padding: 12px !important;
+  }
+
+  .shared-update-banner {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+
+  .pu-live-card {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px 8px;
+    width: 100% !important;
+    overflow: hidden;
+  }
+
+  .pu-live-badge {
+    justify-self: start;
+  }
+
+  .pu-live-metrics {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 10px;
+    width: 100%;
+  }
+
+  .pu-live-column {
+    min-width: 0 !important;
+    overflow-wrap: anywhere;
+  }
+
+  .pu-live-column > div:last-child {
+    font-size: 16px !important;
+    line-height: 1.2;
+  }
+
+  .pu-live-column > div:last-child span {
+    display: block;
+    margin: 2px 0 0 !important;
+    font-size: 11px !important;
+  }
+
+  .pu-live-target {
+    grid-column: 1 / -1;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .pu-live-refresh {
+    justify-self: end;
+    align-self: center;
+    min-width: 36px;
+    min-height: 36px;
   }
 
   .admin-session {

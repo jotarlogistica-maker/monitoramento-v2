@@ -5,6 +5,7 @@ import { deriveRadarStatusFromApi, isAwaitingStatus, isCanceledStatus, isFinishe
 import { fetchSellerMonitoring } from "@/lib/sellerMonitoring";
 import { getMlCookie } from "@/lib/sessionStore";
 import { readRadarDocument, writeRadarDocument } from "@/lib/radarStore";
+import { resolveClusterFromHistory } from "@/lib/sellerRouteHistory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +23,8 @@ async function mapLimited<T, R>(items: T[], fn: (item: T) => Promise<R>): Promis
 }
 
 function clusterOf(routeName?: string): string {
-  return (routeName || "").split("_")[1] || "—";
+  const match = String(routeName || "").match(/_C(\d+)(?:_|$)/i);
+  return match ? `C${match[1].padStart(2, "0")}` : "—";
 }
 
 function orderToVisit(order: any): RadarVisit {
@@ -40,6 +42,21 @@ function orderToVisit(order: any): RadarVisit {
     carrierName: order.carrierName,
     driverName: order.driverName,
   };
+}
+
+function resolveVisitCluster(visits: RadarVisit[], preferred: RadarVisit | null | undefined, fallback = "—") {
+  const resolution = resolveClusterFromHistory(
+    visits.map((visit) => ({
+      rota: visit.routeName,
+      routeId: visit.routeId,
+      timeFromRaw: visit.timeFrom,
+      intervalo: visit.timeFrame,
+    })),
+    preferred
+      ? { rota: preferred.routeName, routeId: preferred.routeId, timeFromRaw: preferred.timeFrom, intervalo: preferred.timeFrame }
+      : null
+  );
+  return { ...resolution, cluster: resolution.cluster !== "—" ? resolution.cluster : fallback };
 }
 
 const saoPauloTime = new Intl.DateTimeFormat("pt-BR", {
@@ -183,6 +200,8 @@ export async function POST(req: NextRequest) {
       });
 
       const now = Date.now();
+      const effectiveVisits = visits.length > 0 ? visits : item.visits;
+      const clusterResolution = resolveVisitCluster(effectiveVisits, nextVisit, item.originCluster || item.cluster);
       const updatedItem: RadarItem = {
         ...item,
         name: result.summary.customerName || item.name,
@@ -193,11 +212,13 @@ export async function POST(req: NextRequest) {
         collectedRoutes,
         cardLag,
         pendingOperational,
-        visits: visits.length > 0 ? visits : item.visits,
+        visits: effectiveVisits,
         nextVisit,
-        cluster: nextVisit?.cluster || item.originCluster || item.cluster,
-        currentCluster: nextVisit?.cluster || item.originCluster || item.currentCluster,
-        clusters: Array.from(new Set([...(item.clusters || []), ...visits.map((visit) => visit.cluster)])).filter(Boolean),
+        cluster: clusterResolution.cluster,
+        currentCluster: clusterResolution.cluster,
+        clusterFromHistory: clusterResolution.fromHistory,
+        clusterSourceRouteName: String(clusterResolution.sourceRoute?.rota || "") || null,
+        clusters: Array.from(new Set([...(item.clusters || []), ...visits.map((visit) => visit.cluster)])).filter((cluster) => !!cluster && cluster !== "—"),
         quality,
         warnings: Array.from(warnings),
         source: "api",
@@ -244,6 +265,8 @@ export async function POST(req: NextRequest) {
         quality: update.quality,
         statusOverride,
       });
+    const mergedVisits = update.visits?.length ? update.visits : latest.visits;
+    const mergedCluster = resolveVisitCluster(mergedVisits, update.nextVisit, latest.originCluster || latest.cluster);
     latestItems[id] = {
         ...latest,
         ...update,
@@ -251,8 +274,10 @@ export async function POST(req: NextRequest) {
         // fotografia antiga usada no início deste lote.
         trigger: latest.trigger,
         originCluster: latest.originCluster,
-        currentCluster: update.nextVisit?.cluster || latest.currentCluster || update.currentCluster,
-        cluster: update.nextVisit?.cluster || latest.currentCluster || update.cluster,
+        currentCluster: mergedCluster.cluster,
+        cluster: mergedCluster.cluster,
+        clusterFromHistory: mergedCluster.fromHistory,
+        clusterSourceRouteName: String(mergedCluster.sourceRoute?.rota || "") || null,
         firstDetectedAt: latest.firstDetectedAt,
         statusOverride,
         warnings: Array.from(new Set([...(latest.warnings || []), ...(update.warnings || [])])),

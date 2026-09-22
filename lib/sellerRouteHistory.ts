@@ -112,3 +112,35 @@ export function clusterFromRoute(route: SellerRouteHistory | null | undefined): 
   const match = String(route?.rota || "").match(/_C(\d+)(?:_|$)/i);
   return match ? `C${match[1].padStart(2, "0")}` : "—";
 }
+
+export type ClusterHistoryResolution = {
+  cluster: string;
+  sourceRoute: SellerRouteHistory | null;
+  fromHistory: boolean;
+};
+
+/**
+ * Mantém o território original do ponto quando a visita operacional atual é
+ * uma rota avulsa/sem cluster. Primeiro tenta a rota preferida; se ela não
+ * tiver um Cxx válido, procura a passagem programada mais recente no histórico.
+ */
+export function resolveClusterFromHistory(
+  routes: SellerRouteHistory[] = [],
+  preferredRoute?: SellerRouteHistory | null
+): ClusterHistoryResolution {
+  const preferredCluster = clusterFromRoute(preferredRoute);
+  if (preferredCluster !== "—") {
+    return { cluster: preferredCluster, sourceRoute: preferredRoute || null, fromHistory: false };
+  }
+
+  const ordered = routes
+    .map((route, index) => ({ route, order: routeOrderValue(route, index) }))
+    .filter(({ route }) => clusterFromRoute(route) !== "—")
+    .sort((a, b) => b.order - a.order);
+  const historical = ordered[0]?.route || null;
+  return {
+    cluster: clusterFromRoute(historical),
+    sourceRoute: historical,
+    fromHistory: !!historical,
+  };
+}

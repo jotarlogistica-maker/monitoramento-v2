@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useRef, useState, Fragment } from "react";
 import RadarTab from "@/components/RadarTab";
 import { reconcileVisitPackages } from "@/lib/pointMetrics";
-import { chooseOperationalRoute, clusterFromRoute } from "@/lib/sellerRouteHistory";
+import { chooseOperationalRoute, resolveClusterFromHistory } from "@/lib/sellerRouteHistory";
 import {
   buildHighestProportionalImpactGroup,
   buildLargestImpactGroup,
@@ -25,8 +25,8 @@ type Route = {
 };
 
 function getCluster(routeName: string | undefined | null): string {
-  const parts = (routeName || "").split("_");
-  return parts[1] || "—";
+  const match = String(routeName || "").match(/_C(\d+)(?:_|$)/i);
+  return match ? `C${match[1].padStart(2, "0")}` : "—";
 }
 
 // Ordena clusters por número (C1, C2...C10, C11), não por texto (que daria
@@ -78,6 +78,20 @@ type Stop = {
 
 type Tab = "visao_geral" | "radar" | "sellers" | "sellers_am" | "rotas_am" | "rotas" | "clusters" | "transportadoras" | "diagnostico";
 
+type SharedUpdate = {
+  status: "idle" | "running" | "completed" | "failed";
+  operationId: string | null;
+  clientId: string | null;
+  deviceLabel: string | null;
+  stage: "routes" | "stops" | "radar" | null;
+  processed: number;
+  total: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  revision: number;
+  message: string | null;
+};
+
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<Tab>("visao_geral");
   const [overviewBreakdown, setOverviewBreakdown] = useState<"clusters" | "transportadoras">("clusters");
@@ -90,7 +104,11 @@ export default function DashboardPage() {
   const [savingSession, setSavingSession] = useState(false);
   const [refreshingRoutes, setRefreshingRoutes] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const actionInProgress = savingSession || refreshingRoutes || resetting;
+  const [clientId, setClientId] = useState("");
+  const [sharedUpdate, setSharedUpdate] = useState<SharedUpdate | null>(null);
+  const lastSharedRevision = useRef<number | null>(null);
+  const remoteUpdating = sharedUpdate?.status === "running" && sharedUpdate.clientId !== clientId;
+  const actionInProgress = savingSession || refreshingRoutes || resetting || remoteUpdating;
   const [filter, setFilter] = useState<"todas" | "sem_inicio" | "com_problema">("todas");
   const [clusterFilter, setClusterFilter] = useState<string>("todos");
   const [carrierFilter, setCarrierFilter] = useState<string>("todas");
@@ -156,7 +174,7 @@ export default function DashboardPage() {
     });
   }
 
-  async function scanAllStops() {
+  async function scanAllStops(operationId: string) {
     setScanning(true);
     let cursor = lastCursor;
     let done = false;
@@ -171,7 +189,7 @@ export default function DashboardPage() {
           res = await fetch("/api/refresh-stops", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ cursor }),
+            body: JSON.stringify({ cursor, operationId }),
           });
           data = await res.json().catch(() => ({}));
         } catch (error: any) {
@@ -182,7 +200,7 @@ export default function DashboardPage() {
 
         if (!res.ok) {
           const sessaoExpirada = /401|expirad/i.test(data.error || "");
-          if (res.status === 409 && Date.now() < leaseWaitDeadline) {
+          if (res.status === 409 && data.retryAfterMs && Date.now() < leaseWaitDeadline) {
             const waitMs = Math.min(15_000, Math.max(2_000, Number(data.retryAfterMs) || 8_000));
             setMsg(`Outro lote ainda está terminando. Retomando automaticamente na posição ${cursor}...`);
             await new Promise((resolve) => setTimeout(resolve, waitMs));
@@ -218,12 +236,34 @@ export default function DashboardPage() {
           body: JSON.stringify({ action: "rebuild" }),
         });
         const radarData = await radarRes.json().catch(() => ({}));
+        await fetch("/api/update-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "finish",
+            operationId,
+            message: radarRes.ok ? "Rotas, paradas e Radar atualizados." : "Rotas e paradas atualizadas; o Radar precisa ser recalculado.",
+          }),
+        });
         setMsg(
           radarRes.ok
             ? "Varredura completa! Radar atualizado automaticamente."
             : `Varredura completa, mas o Radar não foi consolidado: ${radarData.error || "use Recalcular da varredura"}.`
         );
+      } else {
+        await fetch("/api/update-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "fail", operationId, message: "A atualização foi pausada e pode ser retomada pelo painel." }),
+        }).catch(() => undefined);
       }
+    } catch (error: any) {
+      await fetch("/api/update-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "fail", operationId, message: error?.message || "A atualização foi interrompida." }),
+      }).catch(() => undefined);
+      throw error;
     } finally {
       setScanning(false);
       await Promise.all([loadStops(), loadRadarSummary()]);
@@ -269,6 +309,16 @@ export default function DashboardPage() {
   useEffect(() => {
     loadStops();
     loadRadarSummary();
+  }, []);
+
+  useEffect(() => {
+    const storageKey = "pulse-client-id";
+    let id = window.localStorage.getItem(storageKey);
+    if (!id) {
+      id = window.crypto.randomUUID();
+      window.localStorage.setItem(storageKey, id);
+    }
+    setClientId(id);
   }, []);
 
   // ============ SELLERS / PLACES 3.0 ============
@@ -392,8 +442,9 @@ export default function DashboardPage() {
       const rotaAgendada = [...rotas].reverse().find((route) => route.status === "Sem Início");
       const rotaQueColetou = [...rotas].reverse().find((route) => route.coletadosRota > 0);
       const rotaOperacional = rotaAgendada || rotaQueColetou || ultimaRota;
-      const cluster = rotaOperacional?.cluster || "—";
-      const clusters = Array.from(new Set(rotas.map((route) => route.cluster)));
+      const clusterResolution = resolveClusterFromHistory(rotas, rotaOperacional);
+      const cluster = clusterResolution.cluster;
+      const clusters = Array.from(new Set(rotas.map((route) => route.cluster).filter((value) => value && value !== "—")));
       const reconciliado = reconcileVisitPackages(
         rotas.map((route) => ({
           prepared: route.preparadosRota,
@@ -431,6 +482,8 @@ export default function DashboardPage() {
         type: sorted[0]?.idType || "seller",
         name: sorted[0]?.sellerName || id,
         cluster,
+        clusterFromHistory: clusterResolution.fromHistory,
+        clusterSourceRoute: clusterResolution.sourceRoute?.rota || null,
         clusters,
         estimado,
         preparado,
@@ -962,8 +1015,8 @@ export default function DashboardPage() {
     // A resposta atual da API pode não repetir uma rota já finalizada. Usa a
     // rota operacional escolhida do histórico mesclado e mantém o snapshot
     // salvo como fallback, em vez de apagar cluster e última rota.
-    const clusterHistorico = clusterFromRoute(ultimaRotaOperacional);
-    const cluster = clusterHistorico !== "—" ? clusterHistorico : s.cluster || "—";
+    const clusterResolution = resolveClusterFromHistory(rotas, ultimaRotaOperacional);
+    const cluster = clusterResolution.cluster !== "—" ? clusterResolution.cluster : s.cluster || "—";
 
     // Valor absurdamente alto de verdade (tipo 9823928) — bem acima de qualquer
     // número real que já vimos (a maioria fica na casa das centenas) — indica
@@ -996,6 +1049,8 @@ export default function DashboardPage() {
       chegouAposColeta,
       status,
       cluster,
+      clusterFromHistory: clusterResolution.fromHistory,
+      clusterSourceRoute: clusterResolution.sourceRoute?.rota || null,
       ultimaRota: ultimaRotaOperacional || s.ultimaRota || null,
       temRiscoPerda,
       temCancelada,
@@ -1369,6 +1424,66 @@ export default function DashboardPage() {
     }
   }, [activeTab]);
 
+  useEffect(() => {
+    if (!clientId) return;
+    let disposed = false;
+
+    const pollSharedUpdate = async () => {
+      try {
+        const res = await fetch("/api/update-status", { cache: "no-store" });
+        if (!res.ok) return;
+        const state: SharedUpdate = await res.json();
+        if (disposed) return;
+        setSharedUpdate(state);
+
+        if (lastSharedRevision.current === null) {
+          lastSharedRevision.current = state.revision;
+        } else if (state.revision > lastSharedRevision.current) {
+          const updatedByAnotherSession = state.clientId !== clientId;
+          lastSharedRevision.current = state.revision;
+          await Promise.all([loadData(), loadStops(), loadRadarSummary(), loadSellersAm(), loadPuLive()]);
+          if (updatedByAnotherSession) {
+            setMsg(`Dados sincronizados automaticamente após atualização em ${state.deviceLabel || "outro dispositivo"}.`);
+          }
+        }
+      } catch {
+        // Uma falha pontual no indicador não interrompe o uso do painel.
+      }
+    };
+
+    pollSharedUpdate();
+    const timer = window.setInterval(pollSharedUpdate, 3_000);
+    const onVisible = () => document.visibilityState === "visible" && pollSharedUpdate();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [clientId]);
+
+  async function startSharedResume(): Promise<string | null> {
+    const res = await fetch("/api/update-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "start",
+        clientId,
+        deviceLabel: window.innerWidth <= 900 ? "celular" : "computador",
+        stage: "stops",
+        total: routes.length,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setSharedUpdate(data.state || null);
+      setMsg(data.error || "Já existe uma atualização em andamento.");
+      return null;
+    }
+    setSharedUpdate(data.state);
+    return data.operationId;
+  }
+
   // "Atualizar rotas" agora faz as duas coisas em sequência: atualiza a lista
   // de rotas (leve) e, em seguida, roda a varredura completa (pesada, rota por
   // rota) — um botão só, sem precisar ficar trocando de aba pra continuar o
@@ -1376,16 +1491,26 @@ export default function DashboardPage() {
   // do usuário — só roda quando clicado manualmente.
   async function refresh() {
     if (lastCursor > 0) {
+      const operationId = await startSharedResume();
+      if (!operationId) return;
       setMsg(`Retomando a varredura na posição ${lastCursor}, sem buscar uma nova lista de rotas...`);
-      await scanAllStops();
+      await scanAllStops(operationId);
       return;
     }
     setRefreshingRoutes(true);
     setMsg("Buscando rotas no Mercado Livre...");
     try {
-      const res = await fetch("/api/refresh", { method: "POST" });
+      const res = await fetch("/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          deviceLabel: window.innerWidth <= 900 ? "celular" : "computador",
+        }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (data.state) setSharedUpdate(data.state);
         setMsg(`Erro: ${data.error || "não foi possível atualizar as rotas."}`);
         return;
       }
@@ -1393,7 +1518,7 @@ export default function DashboardPage() {
       loadData();
       loadPuLive(); // PU LIVE junto, sem esperar a varredura pesada terminar
       setRefreshingRoutes(false);
-      await scanAllStops();
+      await scanAllStops(data.operationId);
     } catch (error: any) {
       setMsg(`Erro: ${error?.message || "não foi possível atualizar as rotas."}`);
     } finally {
@@ -1681,7 +1806,9 @@ export default function DashboardPage() {
             </button>
             <div style={{ position: "relative" }}>
               <button onClick={refresh} disabled={actionInProgress || scanning} style={primaryBtn}>
-                {scanning
+                {remoteUpdating
+                  ? "Atualização em andamento"
+                  : scanning
                   ? "Varrendo paradas..."
                   : refreshingRoutes
                   ? "Buscando rotas..."
@@ -1715,6 +1842,23 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {sharedUpdate?.status === "running" && (
+          <div className="shared-update-banner" role="status" aria-live="polite">
+            <span className="shared-update-pulse" />
+            <strong>Atualização em andamento</strong>
+            <span>
+              em {sharedUpdate.deviceLabel || "outro dispositivo"}
+              {sharedUpdate.stage === "routes"
+                ? " · buscando rotas"
+                : sharedUpdate.stage === "radar"
+                ? " · consolidando o Radar"
+                : sharedUpdate.total > 0
+                ? ` · ${sharedUpdate.processed}/${sharedUpdate.total} rotas`
+                : " · buscando paradas"}
+            </span>
+          </div>
+        )}
 
         <div className="app-content" style={{ padding: 32, maxWidth: 1280, margin: "0 auto" }}>
           {/* SESSION BOX — sempre visível, discreto */}
@@ -1972,7 +2116,7 @@ export default function DashboardPage() {
                         const faltaParaMeta = Math.max(metaPacotes - puLive.collectedPackages, 0);
                         const metaBatida = faltaParaMeta === 0;
                         const Coluna = ({ label, valor, sub, cor }: { label: string; valor: string; sub?: string; cor?: string }) => (
-                          <div style={{ minWidth: 90 }}>
+                          <div className={`pu-live-column${label.startsWith("Falta") ? " pu-live-target" : ""}`}>
                             <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 2 }}>{label}</div>
                             <div style={{ fontSize: 18, fontWeight: 800, color: cor || "var(--text-primary)" }}>
                               {valor}
@@ -1982,17 +2126,15 @@ export default function DashboardPage() {
                         );
                         return (
                           <div
+                            className="pu-live-card"
                             style={{
                               ...cardStyle,
                               marginBottom: 24,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 20,
                               padding: "12px 16px",
-                              width: "auto",
                             }}
                           >
                             <div
+                              className="pu-live-badge"
                               style={{
                                 fontSize: 13,
                                 fontWeight: 800,
@@ -2005,25 +2147,27 @@ export default function DashboardPage() {
                             >
                               PU LIVE
                             </div>
-                            <Coluna label="Estimados" valor={puLive.estimatedPackages.toLocaleString("pt-BR")} />
-                            <Coluna
-                              label="Coletados"
-                              valor={puLive.collectedPackages.toLocaleString("pt-BR")}
-                              sub={`${pctColetado.toFixed(1).replace(".", ",")}%`}
-                              cor="var(--green)"
-                            />
-                            <Coluna
-                              label="Restantes"
-                              valor={restante.toLocaleString("pt-BR")}
-                              sub={`${pctRestante.toFixed(1).replace(".", ",")}%`}
-                              cor="var(--orange)"
-                            />
-                            <Coluna
-                              label="Falta p/ meta (93%)"
-                              valor={metaBatida ? "Meta batida! 🎉" : faltaParaMeta.toLocaleString("pt-BR")}
-                              cor={metaBatida ? "var(--green)" : "var(--red)"}
-                            />
-                            <button onClick={loadPuLive} title="Atualizar PU LIVE" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>
+                            <div className="pu-live-metrics">
+                              <Coluna label="Estimados" valor={puLive.estimatedPackages.toLocaleString("pt-BR")} />
+                              <Coluna
+                                label="Coletados"
+                                valor={puLive.collectedPackages.toLocaleString("pt-BR")}
+                                sub={`${pctColetado.toFixed(1).replace(".", ",")}%`}
+                                cor="var(--green)"
+                              />
+                              <Coluna
+                                label="Restantes"
+                                valor={restante.toLocaleString("pt-BR")}
+                                sub={`${pctRestante.toFixed(1).replace(".", ",")}%`}
+                                cor="var(--orange)"
+                              />
+                              <Coluna
+                                label="Falta p/ meta (93%)"
+                                valor={metaBatida ? "Meta batida! 🎉" : faltaParaMeta.toLocaleString("pt-BR")}
+                                cor={metaBatida ? "var(--green)" : "var(--red)"}
+                              />
+                            </div>
+                            <button className="pu-live-refresh" onClick={loadPuLive} title="Atualizar PU LIVE" style={{ background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>
                               🔄
                             </button>
                           </div>
@@ -2562,6 +2706,14 @@ export default function DashboardPage() {
                               >
                                 {r.cluster}
                               </button>
+                              {r.clusterFromHistory && (
+                                <div
+                                  title={r.clusterSourceRoute ? `Cluster recuperado da rota ${r.clusterSourceRoute}` : "Cluster recuperado do histórico do ponto"}
+                                  style={{ fontSize: 10, color: "var(--orange)", marginTop: 3 }}
+                                >
+                                  histórico do ponto{r.clusterSourceRoute ? ` · ${r.clusterSourceRoute}` : ""}
+                                </div>
+                              )}
                               {r.clusters.length > 1 && (
                                 <div style={{ fontSize: 10, color: "var(--text-secondary)", marginTop: 3 }}>
                                   histórico: {r.clusters.join(" → ")}
@@ -3074,6 +3226,14 @@ export default function DashboardPage() {
                                 >
                                   {r.cluster}
                                 </span>
+                                {r.clusterFromHistory && (
+                                  <div
+                                    title={r.clusterSourceRoute ? `Cluster recuperado da rota ${r.clusterSourceRoute}` : "Cluster recuperado do histórico do ponto"}
+                                    style={{ fontSize: 10, color: "var(--orange)", marginTop: 3 }}
+                                  >
+                                    histórico do ponto
+                                  </div>
+                                )}
                               </td>
                               <td style={td}>
                                 <input
@@ -3835,7 +3995,7 @@ export default function DashboardPage() {
               </button>
             </div>
             <p style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 0, marginBottom: 12 }}>
-              Cluster calculado pela primeira rota atribuída a cada ponto. Clica numa linha pra filtrar a tabela.
+              Cluster calculado pelas rotas programadas do histórico do ponto. Se a visita atual for avulsa, o último cluster válido é preservado. Clica numa linha pra filtrar a tabela.
             </p>
 
             {sellersAmClusterFilter !== "todos" && (

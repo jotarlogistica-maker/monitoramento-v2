@@ -5,6 +5,7 @@ import { db } from "@/lib/firebaseAdmin";
 import { fetchRouteDetail } from "@/lib/mlApi";
 import { getMlCookie } from "@/lib/sessionStore";
 import { readStopsDocument, writeStopsDocument } from "@/lib/stopsStore";
+import { touchUpdate } from "@/lib/updateStatus";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -120,6 +121,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const cursor = Math.max(0, Number(body.cursor || 0));
   const forceRouteIds = Array.isArray(body.forceRouteIds) ? body.forceRouteIds.map(Number) : [];
+  const operationId = typeof body.operationId === "string" ? body.operationId : "";
 
   let initialData;
   try {
@@ -141,6 +143,18 @@ export async function POST(req: NextRequest) {
   if (!cookie) return NextResponse.json({ error: "Nenhuma sessão salva ainda." }, { status: 400 });
   if (allRoutes.length === 0) {
     return NextResponse.json({ error: "Nenhuma rota carregada ainda. Clica em 'Atualizar rotas' primeiro." }, { status: 400 });
+  }
+
+  if (operationId) {
+    const activeOperation = await touchUpdate(operationId, {
+      stage: "stops",
+      processed: cursor,
+      total: allRoutes.length,
+      message: "Buscando paradas das rotas.",
+    });
+    if (!activeOperation) {
+      return NextResponse.json({ error: "Esta atualização não está mais ativa. Recarregue o painel antes de tentar novamente." }, { status: 409 });
+    }
   }
 
   const lease = await acquireLease();
@@ -187,6 +201,15 @@ export async function POST(req: NextRequest) {
       newStops: results.flatMap((result) => result.stops),
       snapshots,
     });
+
+    if (operationId) {
+      await touchUpdate(operationId, {
+        stage: done ? "radar" : "stops",
+        processed: Math.min(nextCursor, allRoutes.length),
+        total: allRoutes.length,
+        message: done ? "Consolidando o Radar." : "Buscando paradas das rotas.",
+      });
+    }
 
     return NextResponse.json({
       ok: true,

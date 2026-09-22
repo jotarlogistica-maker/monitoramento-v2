@@ -11,7 +11,7 @@ const output = ts.transpileModule(source, {
 }).outputText;
 const moduleObject = { exports: {} };
 new Function("module", "exports", output)(moduleObject, moduleObject.exports);
-const { mergeSellerRouteHistory, chooseOperationalRoute, clusterFromRoute } = moduleObject.exports;
+const { mergeSellerRouteHistory, chooseOperationalRoute, clusterFromRoute, resolveClusterFromHistory } = moduleObject.exports;
 
 const scanned = [
   {
@@ -44,4 +44,14 @@ const withSecondVisit = mergeSellerRouteHistory(retained, [], [
 assert(withSecondVisit.length === 2, "uma segunda visita deve ser acrescentada ao histórico");
 assert(chooseOperationalRoute(withSecondVisit).routeId === 49, "rota operacional aberta deve ser mostrada como última rota");
 
-console.log("Histórico de rotas do Sellers AM: 11 cenários aprovados.");
+const withUnplannedSecondVisit = mergeSellerRouteHistory(retained, [], [
+  { routeId: 77, rota: "Rota não planejada (77)", status: "Sem Início", intervalo: "18:00" },
+]);
+const unplannedRoute = chooseOperationalRoute(withUnplannedSecondVisit);
+const historicalCluster = resolveClusterFromHistory(withUnplannedSecondVisit, unplannedRoute);
+assert(unplannedRoute.routeId === 77, "rota avulsa aberta continua sendo a rota operacional atual");
+assert(historicalCluster.cluster === "C32", "rota avulsa deve herdar o cluster válido do histórico do ponto");
+assert(historicalCluster.fromHistory === true, "origem histórica do cluster deve ser identificável");
+assert(historicalCluster.sourceRoute.routeId === 42, "deve informar qual rota histórica definiu o cluster");
+
+console.log("Histórico de rotas do Sellers AM: 15 cenários aprovados.");

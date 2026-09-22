@@ -2,6 +2,17 @@
 
 O produto passa a se chamar **PULSE — Pickup Unified Logistics Surveillance & Execution**, com nova identidade visual, favicon e assinatura `dev by Jr Araujo`.
 
+## Sincronização multiusuário e Diagnóstico mobile
+
+- Corrigido o PU LIVE no mobile, com métricas em grade e meta em uma linha própria.
+- Adicionado estado global da atualização no Firestore.
+- O painel informa quando outro celular ou computador está atualizando a operação.
+- O progresso da varredura é compartilhado entre todas as sessões abertas.
+- Ao terminar, os dados são recarregados automaticamente nos demais dispositivos.
+- Atualizações concorrentes são bloqueadas e operações interrompidas possuem liberação automática.
+- Pontos em rota avulsa preservam o último cluster válido encontrado no histórico de rotas programadas.
+- Sellers / Places, Sellers AM e Radar indicam quando o cluster exibido foi recuperado do histórico do ponto.
+
 ## Funcionalidades
 
 - A aba **Ocorrências** foi substituída por **Radar operacional**.

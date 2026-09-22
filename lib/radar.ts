@@ -3,6 +3,7 @@ import type { Route, Stop } from "@/lib/mlApi";
 import { reconcileVisitPackages } from "@/lib/pointMetrics";
 import { readStopsDocument } from "@/lib/stopsStore";
 import { readRadarDocument, writeRadarDocument } from "@/lib/radarStore";
+import { resolveClusterFromHistory } from "@/lib/sellerRouteHistory";
 
 export type RadarStatus =
   | "Reatribuir"
@@ -49,6 +50,8 @@ export type RadarItem = {
   originCluster: string;
   currentCluster: string;
   clusters: string[];
+  clusterFromHistory?: boolean;
+  clusterSourceRouteName?: string | null;
 
   trigger: RadarTrigger;
   visits: RadarVisit[];
@@ -87,8 +90,8 @@ type RouteLike = Partial<Route> & { id: number; routeName?: string; status?: str
 type StopLike = Partial<Stop> & { routeId: number; routeName?: string };
 
 function getCluster(routeName?: string | null): string {
-  const parts = (routeName || "").split("_");
-  return parts[1] || "—";
+  const match = String(routeName || "").match(/_C(\d+)(?:_|$)/i);
+  return match ? `C${match[1].padStart(2, "0")}` : "—";
 }
 
 function text(value: unknown): string {
@@ -331,8 +334,30 @@ function analyzePoint(
   const statusOverride = existing?.statusOverride ?? null;
   const status = statusOverride || inferredStatus;
   const now = Date.now();
-  const originCluster = trigger.route.cluster;
-  const currentCluster = nextVisit?.cluster || lastVisit.cluster || originCluster;
+  const routesForCluster = visits.map((visit) => ({
+    rota: visit.routeName,
+    routeId: visit.routeId,
+    timeFromRaw: visit.timeFrom,
+    intervalo: visit.timeFrame,
+  }));
+  const preferredVisit = nextVisit || lastVisit;
+  const clusterResolution = resolveClusterFromHistory(routesForCluster, preferredVisit ? {
+    rota: preferredVisit.routeName,
+    routeId: preferredVisit.routeId,
+    timeFromRaw: preferredVisit.timeFrom,
+    intervalo: preferredVisit.timeFrame,
+  } : null);
+  const originResolution = resolveClusterFromHistory(routesForCluster, {
+    rota: trigger.route.routeName,
+    routeId: trigger.route.routeId,
+    timeFromRaw: trigger.route.timeFrom,
+    intervalo: trigger.route.timeFrame,
+  });
+  const originCluster = originResolution.cluster;
+  const currentCluster = clusterResolution.cluster !== "—" ? clusterResolution.cluster : originCluster;
+  if (clusterResolution.fromHistory && clusterResolution.sourceRoute?.rota) {
+    warnings.push(`Cluster ${currentCluster} recuperado do histórico da rota ${clusterResolution.sourceRoute.rota}.`);
+  }
 
   const item: RadarItem = {
     id,
@@ -342,7 +367,9 @@ function analyzePoint(
     cluster: currentCluster,
     originCluster,
     currentCluster,
-    clusters: Array.from(new Set(visits.map((visit) => visit.cluster))).filter(Boolean),
+    clusters: Array.from(new Set(visits.map((visit) => visit.cluster))).filter((cluster) => !!cluster && cluster !== "—"),
+    clusterFromHistory: clusterResolution.fromHistory,
+    clusterSourceRouteName: String(clusterResolution.sourceRoute?.rota || "") || null,
     trigger,
     visits,
     nextVisit,
